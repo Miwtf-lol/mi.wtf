@@ -121,7 +121,7 @@ LogoGlow.Transparency = 0.3
 LogoGlow.Parent = Logo
 
 -- Title
-Title.Name = "Title"
+Title.Name = "mi.wtf"
 Title.Parent = MainFrame
 Title.BackgroundTransparency = 1
 Title.Position = UDim2.new(0, 145, 0, 15)
@@ -387,38 +387,72 @@ local function canParry(ball, player)
     return distance <= (mi_wtf.fov / 2)
 end
 
--- Main Loop
+-- ====== SETTINGS ======
+mi_wtf.timing = 0.2
+mi_wtf.cooldown = 0.25
+mi_wtf.lastParry = 0
+
+-- ====== SMART AUTO PARRY ======
+local function canParry(ball)
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then 
+        return false 
+    end
+
+    local root = char.HumanoidRootPart
+    local ballPos = ball.Position
+    local velocity = ball.Velocity
+
+    if velocity.Magnitude < 1 then return false end
+
+    local distance = (ballPos - root.Position).Magnitude
+
+    local direction = (root.Position - ballPos).Unit
+    local dot = direction:Dot(velocity.Unit)
+    if dot < 0.8 then return false end
+
+    local timeToHit = distance / velocity.Magnitude
+
+    local ping = mi_wtf.prediction.ping / 1000
+    local adjustedTime = timeToHit - ping
+
+    local finalTiming = mi_wtf.timing
+    if mi_wtf.mobile then
+        finalTiming = finalTiming + 0.05
+    end
+
+    return adjustedTime < finalTiming
+end
+
+-- ====== MAIN LOOP ======
 RunService.Heartbeat:Connect(function()
     if not mi_wtf.enabled then return end
-    
+
+    if tick() - mi_wtf.lastParry < mi_wtf.cooldown then return end
+
     local ball = getBall()
     if not ball then return end
-    
-    for _, player in pairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-            if canParry(ball, player) then
-                -- Tool Parry
-                if mi_wtf.parryTool then
-                    local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
-                    if tool and tool:FindFirstChild("Handle") then
-                        tool:Activate()
-                    end
-                end
-                
-                -- Remote Parry
-                if mi_wtf.parryRemote then
-                    local remote = ReplicatedStorage:FindFirstChild("events")
-                    if remote then
-                        pcall(function()
-                            remote.parry:FireServer()
-                        end)
-                    end
-                end
-                
-                StatusLabel.Text = "Status: Parry Executed -> " .. player.Name
-                break
+
+    if canParry(ball) then
+        
+        if mi_wtf.parryTool then
+            local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+            if tool then
+                tool:Activate()
             end
         end
+
+        if mi_wtf.parryRemote then
+            local remote = ReplicatedStorage:FindFirstChild("events")
+            if remote and remote:FindFirstChild("parry") then
+                pcall(function()
+                    remote.parry:FireServer()
+                end)
+            end
+        end
+
+        mi_wtf.lastParry = tick()
+        StatusLabel.Text = "Status: Parry!"
     end
 end)
 
