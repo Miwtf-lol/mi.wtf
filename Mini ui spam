@@ -1,0 +1,174 @@
+--// mi.wtf PRO MAX (Auto Parry + Mini Spam UI)
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+
+-- SETTINGS
+local mi_wtf = {
+    enabled = false,
+    parryTool = true,
+    parryRemote = true,
+    spam = false,
+    timing = 0.2,
+    cooldown = 0.25,
+    lastParry = 0
+}
+
+-- GUI
+local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
+ScreenGui.ResetOnSpawn = false
+
+local Main = Instance.new("Frame", ScreenGui)
+Main.Size = UDim2.new(0, 350, 0, 300)
+Main.Position = UDim2.new(0.5,-175,0.5,-150)
+Main.BackgroundColor3 = Color3.fromRGB(20,20,40)
+Main.Active = true
+Main.Draggable = true
+
+Instance.new("UICorner", Main)
+
+-- TITLE
+local Title = Instance.new("TextLabel", Main)
+Title.Size = UDim2.new(1,0,0,40)
+Title.BackgroundTransparency = 1
+Title.Text = "mi.wtf PRO MAX"
+Title.TextColor3 = Color3.fromRGB(100,150,255)
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 20
+
+-- STATUS
+local Status = Instance.new("TextLabel", Main)
+Status.Position = UDim2.new(0,0,1,-25)
+Status.Size = UDim2.new(1,0,0,25)
+Status.BackgroundTransparency = 1
+Status.Text = "Status: OFF"
+Status.TextColor3 = Color3.fromRGB(200,200,255)
+
+-- TOGGLE FUNCTION
+local function createToggle(text, y, callback)
+    local btn = Instance.new("TextButton", Main)
+    btn.Size = UDim2.new(0,300,0,40)
+    btn.Position = UDim2.new(0,25,0,y)
+    btn.BackgroundColor3 = Color3.fromRGB(40,40,70)
+    btn.Text = text.." : OFF"
+    btn.TextColor3 = Color3.new(1,1,1)
+
+    local state = false
+    btn.MouseButton1Click:Connect(function()
+        state = not state
+        btn.Text = text.." : "..(state and "ON" or "OFF")
+        callback(state)
+    end)
+end
+
+-- TOGGLES
+createToggle("Auto Parry", 50, function(v)
+    mi_wtf.enabled = v
+    Status.Text = v and "Status: Auto Parry ON" or "Status: OFF"
+end)
+
+createToggle("Tool Parry", 100, function(v)
+    mi_wtf.parryTool = v
+end)
+
+createToggle("Remote Parry", 150, function(v)
+    mi_wtf.parryRemote = v
+end)
+
+-- MINI SPAM UI TOGGLE
+local miniFrame = Instance.new("Frame", ScreenGui)
+miniFrame.Size = UDim2.new(0,140,0,60)
+miniFrame.Position = UDim2.new(0,20,0.6,0)
+miniFrame.BackgroundColor3 = Color3.fromRGB(20,20,40)
+miniFrame.Visible = false
+miniFrame.Active = true
+miniFrame.Draggable = true
+Instance.new("UICorner", miniFrame)
+
+local txt = Instance.new("TextLabel", miniFrame)
+txt.Size = UDim2.new(1,0,0,20)
+txt.BackgroundTransparency = 1
+txt.Text = "SPAM"
+txt.TextColor3 = Color3.fromRGB(100,150,255)
+
+local spamBtn = Instance.new("TextButton", miniFrame)
+spamBtn.Size = UDim2.new(1,-10,0,30)
+spamBtn.Position = UDim2.new(0,5,0,25)
+spamBtn.Text = "OFF"
+spamBtn.BackgroundColor3 = Color3.fromRGB(40,40,70)
+
+spamBtn.MouseButton1Click:Connect(function()
+    mi_wtf.spam = not mi_wtf.spam
+    spamBtn.Text = mi_wtf.spam and "ON" or "OFF"
+end)
+
+createToggle("Mini Spam UI", 200, function(v)
+    miniFrame.Visible = v
+end)
+
+-- BALL DETECT
+local function getBall()
+    for _,v in pairs(Workspace:GetChildren()) do
+        if v.Name == "ball" then
+            return v
+        end
+    end
+end
+
+-- CHECK PARRY
+local function canParry(ball)
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return false end
+
+    local root = char.HumanoidRootPart
+    local vel = ball.Velocity
+
+    if vel.Magnitude < 1 then return false end
+
+    local dist = (ball.Position - root.Position).Magnitude
+    local time = dist / vel.Magnitude
+
+    return time < mi_wtf.timing
+end
+
+-- MAIN LOOP
+RunService.Heartbeat:Connect(function()
+    local ball = getBall()
+    if not ball then return end
+
+    -- AUTO PARRY
+    if mi_wtf.enabled and canParry(ball) then
+        if tick() - mi_wtf.lastParry < mi_wtf.cooldown then return end
+        mi_wtf.lastParry = tick()
+
+        print("TRY PARRY")
+
+        if mi_wtf.parryTool then
+            local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+            if tool then tool:Activate() end
+        end
+
+        if mi_wtf.parryRemote then
+            local ev = ReplicatedStorage:FindFirstChild("events")
+            if ev and ev:FindFirstChild("parry") then
+                ev.parry:FireServer()
+            end
+        end
+    end
+
+    -- SPAM
+    if mi_wtf.spam then
+        local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+        if tool then
+            tool:Activate()
+        end
+    end
+end)
+
+print("mi.wtf PRO MAX loaded")
