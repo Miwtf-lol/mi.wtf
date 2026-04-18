@@ -250,7 +250,14 @@ end
 -- Create Toggles
 local autoParryToggle = createToggle("Auto Parry", 10, function(enabled)
     mi_wtf.enabled = enabled
-    StatusLabel.Text = enabled and "Status: Auto Parry Active" or "Status: Idle"
+
+if enabled then
+    StatusLabel.Text = "Status: 🟢 Auto Parry ON"
+    mi_wtf:notify("Auto Parry ON")
+else
+    StatusLabel.Text = "Status: 🔴 OFF"
+    mi_wtf:notify("Auto Parry OFF")
+end
     mi_wtf:notify("Auto Parry " .. (enabled and "Enabled" or "Disabled"))
 end)
 
@@ -329,9 +336,48 @@ CloseBtn.MouseButton1Click:Connect(function()
     ScreenGui:Destroy()
 end)
 
+local minimized = false
+
+-- tạo nút mini
+local MiniBtn = Instance.new("TextButton")
+MiniBtn.Parent = ScreenGui
+MiniBtn.Size = UDim2.new(0, 50, 0, 50)
+MiniBtn.Position = UDim2.new(0, 20, 0.5, -25)
+MiniBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 60)
+MiniBtn.Text = "mi"
+MiniBtn.TextColor3 = Color3.fromRGB(100,150,255)
+MiniBtn.Font = Enum.Font.GothamBold
+MiniBtn.TextSize = 16
+MiniBtn.Visible = false
+
+local miniCorner = Instance.new("UICorner")
+miniCorner.CornerRadius = UDim.new(1,0)
+miniCorner.Parent = MiniBtn
+
+-- thu nhỏ
 MinimizeBtn.MouseButton1Click:Connect(function()
-    ContentFrame.Visible = not ContentFrame.Visible
-    MinimizeBtn.Text = ContentFrame.Visible and "−" or "+"
+    minimized = true
+    
+    TweenService:Create(MainFrame, TweenInfo.new(0.3), {
+        Size = UDim2.new(0, 0, 0, 0)
+    }):Play()
+
+    wait(0.3)
+    MainFrame.Visible = false
+    MiniBtn.Visible = true
+end)
+
+-- mở lại
+MiniBtn.MouseButton1Click:Connect(function()
+    minimized = false
+
+    MainFrame.Visible = true
+
+    TweenService:Create(MainFrame, TweenInfo.new(0.3), {
+        Size = UDim2.new(0, 400, 0, 350)
+    }):Play()
+
+    MiniBtn.Visible = false
 end)
 
 -- FOV Slider Logic
@@ -378,13 +424,25 @@ local function predictPosition(ball, target)
     return ballPos + (direction * distance) + Vector3.new(0, gravityDrop, 0)
 end
 
-local function canParry(ball, player)
-    if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
-        return false
-    end
-    
-    local distance = (ball.Position - player.Character.HumanoidRootPart.Position).Magnitude
-    return distance <= (mi_wtf.fov / 2)
+local function canParry(ball)
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return false end
+
+    local root = char.HumanoidRootPart
+    local dir = (root.Position - ball.Position).Unit
+    local vel = ball.Velocity.Unit
+
+    local dot = dir:Dot(vel)
+    if dot < 0.85 then return false end
+
+    local distance = (ball.Position - root.Position).Magnitude
+    local speed = ball.Velocity.Magnitude
+
+    if speed < 1 then return false end
+
+    local time = distance / speed
+
+    return time < 0.3
 end
 
 -- ====== SETTINGS ======
@@ -428,31 +486,18 @@ end
 RunService.Heartbeat:Connect(function()
     if not mi_wtf.enabled then return end
 
-    if tick() - mi_wtf.lastParry < mi_wtf.cooldown then return end
-
     local ball = getBall()
     if not ball then return end
 
     if canParry(ball) then
-        
+        print("TRY PARRY")
+
         if mi_wtf.parryTool then
             local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
             if tool then
                 tool:Activate()
             end
         end
-
-        if mi_wtf.parryRemote then
-            local remote = ReplicatedStorage:FindFirstChild("events")
-            if remote and remote:FindFirstChild("parry") then
-                pcall(function()
-                    remote.parry:FireServer()
-                end)
-            end
-        end
-
-        mi_wtf.lastParry = tick()
-        StatusLabel.Text = "Status: Parry!"
     end
 end)
 
@@ -486,25 +531,28 @@ function mi_wtf:notify(text)
     local notifLabel = Instance.new("TextLabel")
     notifLabel.Parent = notif
     notifLabel.BackgroundTransparency = 1
-    notifLabel.Size = UDim2.new(1, 0, 1, 0)
+    notifLabel.Size = UDim2.new(1, -10, 1, -10)
+    notifLabel.Position = UDim2.new(0, 5, 0, 5)
     notifLabel.Font = Enum.Font.GothamSemibold
-    notifLabel.Text = "mi.wtf: " .. text
-    notifLabel.TextColor3 = Color3.fromRGB(100, 150, 255)
-    notifLabel.TextSize = 16
+    notifLabel.Text = "mi.wtf: " .. tostring(text or "")
+    notifLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    notifLabel.TextScaled = true
     notifLabel.TextWrapped = true
     
-    -- Animate In
     notif.Size = UDim2.new(0, 0, 0, 0)
-    local tweenIn = TweenService:Create(notif, TweenInfo.new(0.3), {Size = UDim2.new(0, 300, 0, 60)})
-    tweenIn:Play()
     
-    -- Animate Out
-    wait(3)
-    local tweenOut = TweenService:Create(notif, TweenInfo.new(0.5), {Size = UDim2.new(0, 0, 0, 0)})
-    tweenOut:Play()
-    tweenOut.Completed:Connect(function()
-        notif:Destroy()
-    end)
+    TweenService:Create(notif, TweenInfo.new(0.3), {
+        Size = UDim2.new(0, 300, 0, 60)
+    }):Play()
+    
+    task.wait(3)
+    
+    TweenService:Create(notif, TweenInfo.new(0.3), {
+        Size = UDim2.new(0, 0, 0, 0)
+    }):Play()
+    
+    task.wait(0.3)
+    notif:Destroy()
 end
 
 -- Mobile Detection & Support
@@ -524,3 +572,4 @@ slideIn:Play()
 mi_wtf:notify("mi.wtf Blade Ball Hub Loaded!")
 StatusLabel.Text = "Status: Ready"
 print("mi.wtf loaded successfully - Allusive clone with prediction!")
+mi_wtf:notify("TEST OK")
