@@ -483,6 +483,8 @@ local function canParry(ball)
 end
 
 -- ====== MAIN LOOP ======
+mi_wtf.lastParry = mi_wtf.lastParry or 0
+
 RunService.Heartbeat:Connect(function()
     if not mi_wtf.enabled then return end
 
@@ -490,12 +492,28 @@ RunService.Heartbeat:Connect(function()
     if not ball then return end
 
     if canParry(ball) then
+        
+        -- cooldown 0.25s
+        if tick() - mi_wtf.lastParry < 0.25 then return end
+        mi_wtf.lastParry = tick()
+
         print("TRY PARRY")
 
+        -- Tool Parry
         if mi_wtf.parryTool then
             local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
             if tool then
                 tool:Activate()
+            end
+        end
+
+        -- Remote Parry (QUAN TRỌNG)
+        if mi_wtf.parryRemote then
+            local events = ReplicatedStorage:FindFirstChild("events")
+            if events and events:FindFirstChild("parry") then
+                pcall(function()
+                    events.parry:FireServer()
+                end)
             end
         end
     end
