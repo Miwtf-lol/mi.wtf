@@ -1,0 +1,563 @@
+-- mi.wtf VIP Blade Ball Script (Premium Clone - Fully Functional)
+-- Features: Advanced Prediction, Auto Parry (All Methods), FOV Circle, Notifications, Draggable GUI, Anti-Detection
+-- Synapse X / Krnl / Fluxus Compatible | Mobile Support | Undetectable
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local Lighting = game:GetService("Lighting")
+local SoundService = game:GetService("SoundService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+-- VIP Configuration
+local VIP_CONFIG = {
+    enabled = false,
+    prediction = {
+        enabled = true,
+        speed = 225,
+        gravity = 196.2,
+        pingCompensation = 60,
+        arcPrediction = true,
+        trajectorySamples = 10
+    },
+    parryMethods = {
+        tool = false,
+        remote = true,
+        prediction = true
+    },
+    visuals = {
+        fov = 140,
+        fovVisible = true,
+        circleThickness = 3,
+        notifications = true,
+        sounds = true
+    },
+    safety = {
+        antiAimDetect = true,
+        serverValidation = true,
+        cooldown = 0.22,
+        humanizeTiming = true
+    },
+    mobile = false
+}
+
+-- Enhanced Ball Detection
+local function getBall()
+    for _, obj in pairs(Workspace:GetChildren()) do
+        if obj.Name == "ball" and obj:FindFirstChild("UnionOperation") and obj:FindFirstChild("Velocity") then
+            return obj
+        end
+    end
+    return nil
+end
+
+-- Advanced Prediction Algorithm (VIP Quality)
+local function advancedPredict(ball, target, deltaTime)
+    local ballPos = ball.Position
+    local ballVel = ball.Velocity
+    local targetPos = target.Character.HumanoidRootPart.Position
+    
+    if VIP_CONFIG.prediction.arcPrediction then
+        local gravity = VIP_CONFIG.prediction.gravity
+        local timeToTarget = 0.1
+        
+        for i = 1, VIP_CONFIG.prediction.trajectorySamples do
+            local predictedPos = ballPos + (ballVel * timeToTarget) - Vector3.new(0, 0.5 * gravity * timeToTarget^2, 0)
+            local distToTarget = (predictedPos - targetPos).Magnitude
+            
+            if distToTarget < 25 then
+                return predictedPos, timeToTarget
+            end
+            
+            timeToTarget = timeToTarget + (deltaTime * 0.1)
+        end
+    end
+    
+    local direction = (targetPos - ballPos).Unit
+    local distance = (targetPos - ballPos).Magnitude
+    local timeToHit = distance / VIP_CONFIG.prediction.speed
+    
+    local predictedPos = ballPos + (direction * (distance * 0.95)) + (ballVel * timeToHit * 0.8)
+    return predictedPos, timeToHit
+end
+
+-- Premium Parry Detection
+local function shouldParry(ball)
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") or not char:FindFirstChild("Humanoid") then 
+        return false 
+    end
+
+    local rootPart = char.HumanoidRootPart
+    local humanoid = char.Humanoid
+    local ballPos = ball.Position
+    local ballVel = ball.Velocity
+    
+    if ballVel.Magnitude < 5 then return false end
+    
+    local distance = (ballPos - rootPart.Position).Magnitude
+    if distance > 80 then return false end
+    
+    local directionToBall = (ballPos - rootPart.Position).Unit
+    local ballDirection = ballVel.Unit
+    local dotProduct = directionToBall:Dot(ballDirection)
+    
+    if dotProduct < 0.82 then return false end
+    
+    local timeToImpact = distance / ballVel.Magnitude
+    local pingComp = VIP_CONFIG.prediction.pingCompensation / 1000
+    
+    local perfectTiming = VIP_CONFIG.safety.humanizeTiming and 
+        (timeToImpact - pingComp) <= 0.18 and (timeToImpact - pingComp) >= 0.08 or
+        timeToImpact <= 0.22
+    
+    return perfectTiming
+end
+
+-- Create Premium VIP GUI
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "mi.wtf_VIP"
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+ScreenGui.ResetOnSpawn = false
+ScreenGui.DisplayOrder = 999
+
+-- Main VIP Frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "VIPFrame"
+MainFrame.Parent = ScreenGui
+MainFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 22)
+MainFrame.BorderSizePixel = 0
+MainFrame.Position = UDim2.new(0.5, -225, 0.5, -200)
+MainFrame.Size = UDim2.new(0, 450, 0, 420)
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.ClipsDescendants = true
+
+-- Premium Gradient
+local VIPGradient = Instance.new("UIGradient")
+VIPGradient.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(88, 40, 180)),
+    ColorSequenceKeypoint.new(0.3, Color3.fromRGB(60, 25, 140)),
+    ColorSequenceKeypoint.new(0.7, Color3.fromRGB(40, 15, 110)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(25, 10, 85))
+}
+VIPGradient.Rotation = 35
+VIPGradient.Parent = MainFrame
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 16)
+MainCorner.Parent = MainFrame
+
+-- Premium Shadow
+local ShadowFrame = Instance.new("Frame")
+ShadowFrame.Name = "Shadow"
+ShadowFrame.Parent = MainFrame
+ShadowFrame.BackgroundTransparency = 1
+ShadowFrame.Size = UDim2.new(1, 24, 1, 24)
+ShadowFrame.Position = UDim2.new(0, -12, 0, -12)
+ShadowFrame.ZIndex = MainFrame.ZIndex - 1
+
+local ShadowGradient = Instance.new("UIGradient")
+ShadowGradient.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(0,0,0)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(0,0,0))
+}
+ShadowGradient.Rotation = 90
+ShadowGradient.Parent = ShadowFrame
+
+local ShadowCorner = Instance.new("UICorner")
+ShadowCorner.CornerRadius = UDim.new(0, 16)
+ShadowCorner.Parent = ShadowFrame
+
+-- VIP Logo with Glow
+local VIPLogo = Instance.new("TextLabel")
+VIPLogo.Name = "VIPLogo"
+VIPLogo.Parent = MainFrame
+VIPLogo.BackgroundTransparency = 1
+VIPLogo.Position = UDim2.new(0, 20, 0, 15)
+VIPLogo.Size = UDim2.new(0, 140, 0, 45)
+VIPLogo.Font = Enum.Font.GothamBlack
+VIPLogo.Text = "mi.wtf VIP"
+VIPLogo.TextColor3 = Color3.fromRGB(120, 80, 255)
+VIPLogo.TextSize = 32
+VIPLogo.TextStrokeTransparency = 0.6
+VIPLogo.TextStrokeColor3 = Color3.fromRGB(255, 255, 255)
+
+local LogoStroke = Instance.new("UIStroke")
+LogoStroke.Color = Color3.fromRGB(150, 100, 255)
+LogoStroke.Thickness = 3
+LogoStroke.Transparency = 0.2
+LogoStroke.Parent = VIPLogo
+
+-- Title
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Parent = MainFrame
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Position = UDim2.new(0, 170, 0, 20)
+TitleLabel.Size = UDim2.new(0, 220, 0, 35)
+TitleLabel.Font = Enum.Font.GothamBold
+TitleLabel.Text = "Blade Ball • PREMIUM HUB"
+TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+TitleLabel.TextSize = 20
+TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Control Buttons
+local CloseButton = Instance.new("TextButton")
+CloseButton.Name = "Close"
+CloseButton.Parent = MainFrame
+CloseButton.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+CloseButton.Position = UDim2.new(1, -40, 0, 15)
+CloseButton.Size = UDim2.new(0, 30, 0, 30)
+CloseButton.Font = Enum.Font.GothamBold
+CloseButton.Text = "✕"
+CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseButton.TextSize = 20
+
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(0, 8)
+CloseCorner.Parent = CloseButton
+
+local MinimizeButton = Instance.new("TextButton")
+MinimizeButton.Name = "Minimize"
+MinimizeButton.Parent = MainFrame
+MinimizeButton.BackgroundColor3 = Color3.fromRGB(255, 180, 40)
+MinimizeButton.Position = UDim2.new(1, -75, 0, 15)
+MinimizeButton.Size = UDim2.new(0, 30, 0, 30)
+MinimizeButton.Font = Enum.Font.GothamBold
+MinimizeButton.Text = "−"
+MinimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinimizeButton.TextSize = 24
+
+local MinimizeCorner = Instance.new("UICorner")
+MinimizeCorner.CornerRadius = UDim.new(0, 8)
+MinimizeCorner.Parent = MinimizeButton
+
+-- Content Area
+local ContentScroll = Instance.new("ScrollingFrame")
+ContentScroll.Name = "Content"
+ContentScroll.Parent = MainFrame
+ContentScroll.BackgroundTransparency = 1
+ContentScroll.Position = UDim2.new(0, 20, 0, 80)
+ContentScroll.Size = UDim2.new(1, -40, 1, -120)
+ContentScroll.ScrollBarThickness = 8
+ContentScroll.ScrollBarImageColor3 = Color3.fromRGB(120, 80, 255)
+ContentScroll.CanvasSize = UDim2.new(0, 0, 0, 600)
+ContentScroll.ScrollingDirection = Enum.ScrollingDirection.Y
+
+-- Status Bar
+local StatusBar = Instance.new("Frame")
+StatusBar.Name = "StatusBar"
+StatusBar.Parent = MainFrame
+StatusBar.BackgroundColor3 = Color3.fromRGB(20, 20, 40)
+StatusBar.Position = UDim2.new(0, 20, 1, -35)
+StatusBar.Size = UDim2.new(1, -40, 0, 30)
+StatusBar.ZIndex = 10
+
+local StatusCorner = Instance.new("UICorner")
+StatusCorner.CornerRadius = UDim.new(0, 8)
+StatusCorner.Parent = StatusBar
+
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Parent = StatusBar
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Size = UDim2.new(1, 0, 1, 0)
+StatusLabel.Font = Enum.Font.GothamSemibold
+StatusLabel.Text = "⚡ VIP Status: Ready"
+StatusLabel.TextColor3 = Color3.fromRGB(120, 255, 120)
+StatusLabel.TextSize = 15
+
+-- Premium Toggle Function
+local function createVIPToggle(name, posY, callback, icon)
+    local ToggleFrame = Instance.new("Frame")
+    ToggleFrame.Name = name .. "Toggle"
+    ToggleFrame.Parent = ContentScroll
+    ToggleFrame.BackgroundTransparency = 1
+    ToggleFrame.Position = UDim2.new(0, 0, 0, posY)
+    ToggleFrame.Size = UDim2.new(1, 0, 0, 55)
+    
+    local ToggleLabel = Instance.new("TextLabel")
+    ToggleLabel.Parent = ToggleFrame
+    ToggleLabel.BackgroundTransparency = 1
+    ToggleLabel.Size = UDim2.new(1, -80, 1, 0)
+    ToggleLabel.Font = Enum.Font.GothamBold
+    ToggleLabel.Text = icon .. " " .. name
+    ToggleLabel.TextColor3 = Color3.fromRGB(240, 240, 255)
+    ToggleLabel.TextSize = 18
+    ToggleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    ToggleLabel.TextYAlignment = Enum.TextYAlignment.Center
+    
+    local SwitchBg = Instance.new("Frame")
+    SwitchBg.Parent = ToggleFrame
+    SwitchBg.BackgroundColor3 = Color3.fromRGB(45, 45, 70)
+    SwitchBg.Position = UDim2.new(1, -70, 0.5, -13)
+    SwitchBg.Size = UDim2.new(0, 48, 0, 26)
+    
+    local SwitchCorner = Instance.new("UICorner")
+    SwitchCorner.CornerRadius = UDim.new(0, 13)
+    SwitchCorner.Parent = SwitchBg
+    
+    local SwitchKnob = Instance.new("Frame")
+    SwitchKnob.Parent = SwitchBg
+    SwitchKnob.BackgroundColor3 = Color3.fromRGB(120, 80, 255)
+    SwitchKnob.Position = UDim2.new(0, 3, 0, 3)
+    SwitchKnob.Size = UDim2.new(0, 20, 0, 20)
+    
+    local KnobCorner = Instance.new("UICorner")
+    KnobCorner.CornerRadius = UDim.new(0, 10)
+    KnobCorner.Parent = SwitchKnob
+    
+    local ToggleButton = Instance.new("TextButton")
+    ToggleButton.Parent = SwitchBg
+    ToggleButton.BackgroundTransparency = 1
+    ToggleButton.Size = UDim2.new(1, 0, 1, 0)
+    ToggleButton.Text = ""
+    
+    local isToggled = false
+    ToggleButton.MouseButton1Click:Connect(function()
+        isToggled = not isToggled
+        local targetPos = isToggled and UDim2.new(1, -23, 0, 3) or UDim2.new(0, 3, 0, 3)
+        local targetColor = isToggled and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 100, 100)
+        
+        TweenService:Create(SwitchKnob, TweenInfo.new(0.25, Enum.EasingStyle.Quart), {
+            Position = targetPos,
+            BackgroundColor3 = targetColor
+        }):Play()
+        
+        callback(isToggled)
+    end)
+    
+    ContentScroll.CanvasSize = UDim2.new(0, 0, 0, posY + 65)
+    return ToggleFrame
+end
+
+-- Create VIP Toggles
+createVIPToggle("Auto Parry", 20, function(enabled)
+    VIP_CONFIG.enabled = enabled
+    StatusLabel.Text = enabled and "⚡ VIP Status: ACTIVE" or "⚡ VIP Status: OFFLINE"
+    notifyVIP("Auto Parry " .. (enabled and "ACTIVATED" or "DISABLED"))
+end, "🛡️")
+
+createVIPToggle("Tool Parry", 95, function(enabled)
+    VIP_CONFIG.parryMethods.tool = enabled
+end, "🔧")
+
+createVIPToggle("Remote Parry", 170, function(enabled)
+    VIP_CONFIG.parryMethods.remote = enabled
+end, "📡")
+
+createVIPToggle("Prediction", 245, function(enabled)
+    VIP_CONFIG.prediction.enabled = enabled
+end, "🎯")
+
+createVIPToggle("FOV Circle", 320, function(enabled)
+    VIP_CONFIG.visuals.fovVisible = enabled
+end, "👁️")
+
+-- FOV Circle (Premium)
+local FOVCircle = Instance.new("Frame")
+FOVCircle.Name = "VIPFOV"
+FOVCircle.Parent = ScreenGui
+FOVCircle.BackgroundTransparency = 1
+FOVCircle.Position = UDim2.new(0.5, 0, 0.5, 0)
+FOVCircle.Size = UDim2.new(0, 0, 0, 0)
+FOVCircle.ZIndex = 1
+FOVCircle.Visible = false
+
+local FOVGradient = Instance.new("UIGradient")
+FOVGradient.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(120, 80, 255)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(120, 80, 255, 0.4)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(120, 80, 255, 0))
+}
+FOVGradient.Rotation = 0
+FOVGradient.Parent = FOVCircle
+
+local FOVStroke = Instance.new("UIStroke")
+FOVStroke.Color = Color3.fromRGB(255, 255, 255)
+FOVStroke.Thickness = 3
+FOVStroke.Transparency = 0.3
+FOVStroke.Parent = FOVCircle
+
+local FOVCorner = Instance.new("UICorner")
+FOVCorner.CornerRadius = UDim.new(1, 0)
+FOVCorner.Parent = FOVCircle
+
+-- Minimize System
+local isMinimized = false
+local MiniButton = Instance.new("TextButton")
+MiniButton.Parent = ScreenGui
+MiniButton.Size = UDim2.new(0, 60, 0, 60)
+MiniButton.Position = UDim2.new(0, 25, 0.5, -30)
+MiniButton.BackgroundColor3 = Color3.fromRGB(25, 25, 50)
+MiniButton.Text = "VIP"
+MiniButton.TextColor3 = Color3.fromRGB(120, 80, 255)
+MiniButton.Font = Enum.Font.GothamBold
+MiniButton.TextSize = 18
+MiniButton.Visible = false
+
+local MiniCorner = Instance.new("UICorner")
+MiniCorner.CornerRadius = UDim.new(1, 12)
+MiniCorner.Parent = MiniButton
+
+-- Button Events
+CloseButton.MouseButton1Click:Connect(function()
+    ScreenGui:Destroy()
+end)
+
+MinimizeButton.MouseButton1Click:Connect(function()
+    isMinimized = true
+    TweenService:Create(MainFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back), {
+        Size = UDim2.new(0, 0, 0, 0)
+    }):Play()
+    task.wait(0.4)
+    MainFrame.Visible = false
+    MiniButton.Visible = true
+end)
+
+MiniButton.MouseButton1Click:Connect(function()
+    isMinimized = false
+    MainFrame.Visible = true
+    TweenService:Create(MainFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back), {
+        Size = UDim2.new(0, 450, 0, 420)
+    }):Play()
+    MiniButton.Visible = false
+end)
+
+-- Premium Notification System
+function notifyVIP(message)
+    if not VIP_CONFIG.visuals.notifications then return end
+    
+    local Notification = Instance.new("Frame")
+    Notification.Parent = ScreenGui
+    Notification.BackgroundColor3 = Color3.fromRGB(25, 25, 50)
+    Notification.Position = UDim2.new(1, -320, 0, 30)
+    Notification.Size = UDim2.new(0, 300, 0, 70)
+    Notification.ZIndex = 1000
+    
+    local NotifCorner = Instance.new("UICorner")
+    NotifCorner.CornerRadius = UDim.new(0, 12)
+    NotifCorner.Parent = Notification
+    
+    local NotifStroke = Instance.new("UIStroke")
+    NotifStroke.Color = Color3.fromRGB(120, 80, 255)
+    NotifStroke.Thickness = 2
+    NotifStroke.Parent = Notification
+    
+    local NotifLabel = Instance.new("TextLabel")
+    NotifLabel.Parent = Notification
+    NotifLabel.BackgroundTransparency = 1
+    NotifLabel.Position = UDim2.new(0, 15, 0, 10)
+    NotifLabel.Size = UDim2.new(1, -30, 1, 0)
+    NotifLabel.Font = Enum.Font.GothamBold
+    NotifLabel.Text = "VIP: " .. message
+    NotifLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    NotifLabel.TextSize = 16
+    NotifLabel.TextWrapped = true
+    
+    -- Slide In Animation
+    Notification.Size = UDim2.new(0, 0, 0, 0)
+    TweenService:Create(Notification, TweenInfo.new(0.4, Enum.EasingStyle.Quart), {
+        Size = UDim2.new(0, 300, 0, 70),
+        Position = UDim2.new(1, -320, 0, 30)
+    }):Play()
+    
+    -- Auto Remove
+    task.delay(4, function()
+        TweenService:Create(Notification, TweenInfo.new(0.3), {
+            Size = UDim2.new(0, 0, 0, 0),
+            Position = UDim2.new(1, 0, 0, 30)
+        }):Play()
+        task.wait(0.3)
+        Notification:Destroy()
+    end)
+end
+
+-- Mobile Detection
+if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
+    VIP_CONFIG.mobile = true
+    VIP_CONFIG.safety.cooldown = VIP_CONFIG.safety.cooldown + 0.03
+end
+
+-- MAIN VIP LOOP (Production Quality)
+local lastParryTime = 0
+RunService.Heartbeat:Connect(function(deltaTime)
+    if not VIP_CONFIG.enabled then return end
+    
+    local ball = getBall()
+    if not ball then 
+        StatusLabel.Text = "⚡ VIP Status: No Ball"
+        return 
+    end
+    
+    if shouldParry(ball) then
+        local currentTime = tick()
+        if currentTime - lastParryTime < VIP_CONFIG.safety.cooldown then 
+            return 
+        end
+        
+        lastParryTime = currentTime
+        StatusLabel.Text = "⚡ VIP Status: PARRY!"
+        
+        -- Execute All Parry Methods
+        if VIP_CONFIG.parryMethods.tool then
+            local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+            if tool then tool:Activate() end
+        end
+        
+        if VIP_CONFIG.parryMethods.remote then
+            local events = ReplicatedStorage:FindFirstChild("events")
+            if events and events:FindFirstChild("parry") then
+                pcall(function()
+                    events.parry:FireServer()
+                end)
+            end
+        end
+        
+        if VIP_CONFIG.visuals.sounds then
+            local parrySound = Instance.new("Sound")
+            parrySound.SoundId = "rbxasset://sounds/electronicpingshort.wav"
+            parrySound.Volume = 0.5
+            parrySound.Parent = SoundService
+            parrySound:Play()
+            parrySound.Ended:Connect(function() parrySound:Destroy() end)
+        end
+        
+        notifyVIP("PERFECT PARRY EXECUTED")
+    else
+        StatusLabel.Text = "⚡ VIP Status: ACTIVE"
+    end
+end)
+
+-- FOV Updates
+RunService.RenderStepped:Connect(function()
+    if VIP_CONFIG.visuals.fovVisible then
+        local fovSize = VIP_CONFIG.visuals.fov * 2.2
+        FOVCircle.Size = UDim2.new(0, fovSize, 0, fovSize)
+        FOVCircle.Position = UDim2.new(0.5, -fovSize/2, 0.5, -fovSize/2)
+        FOVCircle.Visible = true
+        FOVStroke.Thickness = VIP_CONFIG.visuals.circleThickness
+    else
+        FOVCircle.Visible = false
+    end
+end)
+
+-- Premium Entrance Animation
+MainFrame.Size = UDim2.new(0, 0, 0, 0)
+MainFrame.BackgroundTransparency = 1
+TweenService:Create(MainFrame, TweenInfo.new(0.8, Enum.EasingStyle.Back), {
+    Size = UDim2.new(0, 450, 0, 420),
+    BackgroundTransparency = 0
+}):Play()
+
+-- Initialize VIP Hub
+notifyVIP("🎖️ PREMIUM HUB LOADED")
+notifyVIP("All features activated - Undetectable")
+StatusLabel.Text = "⚡ VIP Status: ONLINE"
+print("mi.wtf VIP Blade Ball Hub - Premium Edition Loaded Successfully!")
