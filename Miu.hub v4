@@ -1,385 +1,667 @@
 --[[
-  Script: Etheric Silent Auth / Silent Aim + GUI
-  (Deobfuscated & rewritten for readability)
+  Script: Auto Farm Hub (Deobfuscated)
+  Version: 1.0.0
 ]]
 
+-- ============================================
+-- Khởi tạo services
+-- ============================================
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local VirtualInput = game:GetService("VirtualInputManager")
+local HttpService = game:GetService("HttpService")
+local MarketplaceService = game:GetService("MarketplaceService")
 local LocalPlayer = Players.LocalPlayer
-local NetworkStats = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]
+local Mouse = LocalPlayer:GetMouse()
 
--- Decryption helper (removed xor layer since original used v7() for strings)
--- Original v7() just XORs strings with a key for obfuscation
-local function decrypt(str, key)
-    local result = {}
-    for i = 1, #str, 2 do
-        local byte1 = string.byte(str, i)
-        local byte2 = string.byte(str, i + 1)
-        local keyByte = string.byte(key, (i % #key) + 1)
-        local decrypted = bit32.bxor(byte1, byte2, keyByte) % 256
-        table.insert(result, string.char(decrypted))
-    end
-    return table.concat(result)
+-- ============================================
+-- Biến toàn cục
+-- ============================================
+local isRunning = false
+local autoFarmEnabled = false
+local speedEnabled = false
+local jumpEnabled = false
+local aimEnabled = false
+local walkSpeed = 16
+local jumpPower = 50
+local autoClickDelay = 0.1
+local targetDistance = 50
+
+-- GUI references
+local GUI
+local MainFrame
+local Tabs = {}
+local CurrentTab = "Main"
+
+-- ============================================
+-- Hàm tạo UI
+-- ============================================
+local function CreateNotification(title, text, duration)
+    duration = duration or 3
+    local notification = Instance.new("ScreenGui")
+    local frame = Instance.new("Frame")
+    local titleLabel = Instance.new("TextLabel")
+    local textLabel = Instance.new("TextLabel")
+    
+    notification.Name = "Notification"
+    notification.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    
+    frame.Size = UDim2.new(0, 300, 0, 80)
+    frame.Position = UDim2.new(0.5, -150, 0, 10)
+    frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    frame.BorderSizePixel = 0
+    frame.Active = true
+    frame.Parent = notification
+    
+    local UICorner = Instance.new("UICorner")
+    UICorner.CornerRadius = UDim.new(0, 8)
+    UICorner.Parent = frame
+    
+    titleLabel.Size = UDim2.new(1, -20, 0, 25)
+    titleLabel.Position = UDim2.new(0, 10, 0, 5)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    titleLabel.TextScaled = true
+    titleLabel.Text = title
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.Parent = frame
+    
+    textLabel.Size = UDim2.new(1, -20, 0, 40)
+    textLabel.Position = UDim2.new(0, 10, 0, 30)
+    textLabel.BackgroundTransparency = 1
+    textLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    textLabel.TextScaled = true
+    textLabel.Text = text
+    textLabel.Font = Enum.Font.Gotham
+    textLabel.Parent = frame
+    
+    -- Animation
+    frame:TweenPosition(UDim2.new(0.5, -150, 0, 10), "Out", "Quad", 0.3, true)
+    
+    task.wait(duration)
+    
+    frame:TweenPosition(UDim2.new(0.5, -150, 0, -100), "Out", "Quad", 0.3, true)
+    task.wait(0.3)
+    notification:Destroy()
 end
 
--- Actually, let's just rewrite cleanly without the obfuscation layer.
-
 -- ============================================
--- Setup
+-- Hàm tạo tab
 -- ============================================
-local GuiLibrary = loadstring(game:HttpGetAsync("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
--- Note: Above link is just a placeholder for a generic UI lib; original used a custom one.
-
-local Notify = GuiLibrary.Notification()
-local UI = GuiLibrary.new({ Title = "Etheric Hub" })
-
--- ============================================
--- Silent Aim Storage
--- ============================================
-local silentAimTargets = {} -- stores {target, args} pairs
-local lastClickTime = 0
-local isSilentAimEnabled = false
-local cps = 10 -- clicks per second
-local silentAimKey = Enum.KeyCode.E
-local lastFireTime = 0
-
--- Hook RemoteEvent firing to capture silent aim data
-local oldNamecall
-oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-    local method = getnamecallmethod()
+local function CreateTab(name, icon)
+    local tab = Instance.new("Frame")
+    tab.Name = name
+    tab.Size = UDim2.new(1, 0, 1, -40)
+    tab.Position = UDim2.new(0, 0, 0, 40)
+    tab.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    tab.BorderSizePixel = 0
+    tab.Visible = false
+    tab.Parent = MainFrame
     
-    if method == "FireServer" and self:IsA("RemoteEvent") then
-        return function(...)
-            local args = {...}
-            if #args == 1 and type(args[0]) == "table" then
-                silentAimTargets[self] = args
+    -- Tab button
+    local tabButton = Instance.new("TextButton")
+    tabButton.Size = UDim2.new(0, 80, 0, 35)
+    tabButton.Position = UDim2.new(0, (#Tabs * 85), 0, 2)
+    tabButton.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    tabButton.BorderSizePixel = 0
+    tabButton.TextColor3 = Color3.fromRGB(200, 200, 200)
+    tabButton.Text = name
+    tabButton.Font = Enum.Font.Gotham
+    tabButton.TextScaled = true
+    tabButton.Parent = GUI:FindFirstChild("TabBar") or MainFrame
+    
+    local UICorner = Instance.new("UICorner")
+    UICorner.CornerRadius = UDim.new(0, 6)
+    UICorner.Parent = tabButton
+    
+    tabButton.MouseButton1Click:Connect(function()
+        for _, t in pairs(Tabs) do
+            t.Frame.Visible = false
+            t.Button.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+        end
+        tab.Visible = true
+        tabButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+        CurrentTab = name
+    end)
+    
+    Tabs[name] = { Frame = tab, Button = tabButton }
+    return tab
+end
+
+-- ============================================
+-- Hàm tạo section
+-- ============================================
+local function CreateSection(tab, name)
+    local section = Instance.new("Frame")
+    section.Size = UDim2.new(1, -10, 0, 30)
+    section.Position = UDim2.new(0, 5, 0, 5 + (#tab:GetChildren() * 35))
+    section.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    section.BorderSizePixel = 0
+    section.Parent = tab
+    
+    local UICorner = Instance.new("UICorner")
+    UICorner.CornerRadius = UDim.new(0, 4)
+    UICorner.Parent = section
+    
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -10, 1, 0)
+    label.Position = UDim2.new(0, 10, 0, 0)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.Text = name
+    label.Font = Enum.Font.GothamBold
+    label.TextScaled = true
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = section
+    
+    return section
+end
+
+-- ============================================
+-- Hàm tạo toggle
+-- ============================================
+local function CreateToggle(tab, name, default, callback)
+    local yPos = 40 + (#tab:GetChildren() * 35)
+    
+    local toggleFrame = Instance.new("Frame")
+    toggleFrame.Size = UDim2.new(1, -10, 0, 30)
+    toggleFrame.Position = UDim2.new(0, 5, 0, yPos)
+    toggleFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    toggleFrame.BorderSizePixel = 0
+    toggleFrame.Parent = tab
+    
+    local UICorner = Instance.new("UICorner")
+    UICorner.CornerRadius = UDim.new(0, 4)
+    UICorner.Parent = toggleFrame
+    
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0.7, -10, 1, 0)
+    label.Position = UDim2.new(0, 10, 0, 0)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = Color3.fromRGB(200, 200, 200)
+    label.Text = name
+    label.Font = Enum.Font.Gotham
+    label.TextScaled = true
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = toggleFrame
+    
+    local toggleBtn = Instance.new("TextButton")
+    toggleBtn.Size = UDim2.new(0, 40, 0, 40)
+    toggleBtn.Position = UDim2.new(1, -45, 0, -5)
+    toggleBtn.BackgroundColor3 = default and Color3.fromRGB(0, 255, 100) or Color3.fromRGB(100, 100, 100)
+    toggleBtn.BorderSizePixel = 0
+    toggleBtn.Text = ""
+    toggleBtn.Parent = toggleFrame
+    
+    local btnUICorner = Instance.new("UICorner")
+    btnUICorner.CornerRadius = UDim.new(1, 0)
+    btnUICorner.Parent = toggleBtn
+    
+    local state = default
+    
+    toggleBtn.MouseButton1Click:Connect(function()
+        state = not state
+        toggleBtn.BackgroundColor3 = state and Color3.fromRGB(0, 255, 100) or Color3.fromRGB(100, 100, 100)
+        if callback then
+            pcall(callback, state)
+        end
+    end)
+    
+    return toggleBtn, state
+end
+
+-- ============================================
+-- Hàm tạo slider
+-- ============================================
+local function CreateSlider(tab, name, min, max, default, callback)
+    local yPos = 40 + (#tab:GetChildren() * 35)
+    
+    local sliderFrame = Instance.new("Frame")
+    sliderFrame.Size = UDim2.new(1, -10, 0, 40)
+    sliderFrame.Position = UDim2.new(0, 5, 0, yPos)
+    sliderFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    sliderFrame.BorderSizePixel = 0
+    sliderFrame.Parent = tab
+    
+    local UICorner = Instance.new("UICorner")
+    UICorner.CornerRadius = UDim.new(0, 4)
+    UICorner.Parent = sliderFrame
+    
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0.6, -10, 0, 20)
+    label.Position = UDim2.new(0, 10, 0, 0)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = Color3.fromRGB(200, 200, 200)
+    label.Text = name .. ": " .. default
+    label.Font = Enum.Font.Gotham
+    label.TextScaled = true
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = sliderFrame
+    
+    local value = default
+    
+    local slider = Instance.new("Frame")
+    slider.Size = UDim2.new(0.8, 0, 0, 6)
+    slider.Position = UDim2.new(0.1, 0, 0, 28)
+    slider.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    slider.BorderSizePixel = 0
+    slider.Parent = sliderFrame
+    
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+    fill.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+    fill.BorderSizePixel = 0
+    fill.Parent = slider
+    
+    local UICorner2 = Instance.new("UICorner")
+    UICorner2.CornerRadius = UDim.new(1, 0)
+    UICorner2.Parent = slider
+    
+    local dragBtn = Instance.new("TextButton")
+    dragBtn.Size = UDim2.new(0, 20, 0, 20)
+    dragBtn.Position = UDim2.new((default - min) / (max - min), -10, 0, -7)
+    dragBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+    dragBtn.BorderSizePixel = 0
+    dragBtn.Text = ""
+    dragBtn.Parent = sliderFrame
+    
+    local dragUICorner = Instance.new("UICorner")
+    dragUICorner.CornerRadius = UDim.new(1, 0)
+    dragUICorner.Parent = dragBtn
+    
+    local dragging = false
+    
+    dragBtn.MouseButton1Down:Connect(function()
+        dragging = true
+    end)
+    
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local pos = UDim2.new(math.clamp((Mouse.X - slider.AbsolutePosition.X) / slider.AbsoluteSize.X, 0, 1), 0, 0, 6)
+            fill.Size = UDim2.new(pos.X.Scale, 0, 1, 0)
+            dragBtn.Position = UDim2.new(pos.X.Scale, -10, 0, -7)
+            value = math.floor(min + (max - min) * pos.X.Scale)
+            label.Text = name .. ": " .. value
+            if callback then
+                pcall(callback, value)
             end
-            return oldNamecall(self, ...)
         end
-    end
-    return oldNamecall(self, ...)
-end))
-
--- ============================================
--- Auto-click function
--- ============================================
-local function autoClick()
-    VirtualInput:SendMouseButtonEvent(0, 0, 0, true, game, 0)
-    VirtualInput:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+    end)
     
-    local now = tick()
-    if now - lastClickTime >= 0.025 then
-        for remote, args in next, silentAimTargets do
-            task.spawn(function()
-                remote:FireServer(unpack(args[0]))
-            end)
+    return value
+end
+
+-- ============================================
+-- Hàm tạo button
+-- ============================================
+local function CreateButton(tab, name, callback)
+    local yPos = 40 + (#tab:GetChildren() * 35)
+    
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, -10, 0, 35)
+    btn.Position = UDim2.new(0, 5, 0, yPos)
+    btn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    btn.BorderSizePixel = 0
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Text = name
+    btn.Font = Enum.Font.Gotham
+    btn.TextScaled = true
+    btn.Parent = tab
+    
+    local UICorner = Instance.new("UICorner")
+    UICorner.CornerRadius = UDim.new(0, 6)
+    UICorner.Parent = btn
+    
+    btn.MouseButton1Click:Connect(function()
+        if callback then
+            pcall(callback)
         end
-        lastClickTime = now
+    end)
+    
+    return btn
+end
+
+-- ============================================
+-- Khởi tạo GUI
+-- ============================================
+local function InitializeGUI()
+    -- Main GUI
+    GUI = Instance.new("ScreenGui")
+    GUI.Name = "ScriptHub"
+    GUI.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    
+    -- Main Frame
+    MainFrame = Instance.new("Frame")
+    MainFrame.Size = UDim2.new(0, 500, 0, 400)
+    MainFrame.Position = UDim2.new(0.5, -250, 0.5, -200)
+    MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    MainFrame.BorderSizePixel = 0
+    MainFrame.Active = true
+    MainFrame.Draggable = true
+    MainFrame.Parent = GUI
+    
+    local mainUICorner = Instance.new("UICorner")
+    mainUICorner.CornerRadius = UDim.new(0, 10)
+    mainUICorner.Parent = MainFrame
+    
+    -- Title bar
+    local titleBar = Instance.new("Frame")
+    titleBar.Size = UDim2.new(1, 0, 0, 35)
+    titleBar.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    titleBar.BorderSizePixel = 0
+    titleBar.Parent = MainFrame
+    
+    local titleUICorner = Instance.new("UICorner")
+    titleUICorner.CornerRadius = UDim.new(0, 8)
+    titleUICorner.Parent = titleBar
+    
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Size = UDim2.new(1, -50, 1, 0)
+    titleLabel.Position = UDim2.new(0, 15, 0, 0)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    titleLabel.Text = "Script Hub v1.0.0"
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextScaled = true
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.Parent = titleBar
+    
+    -- Close button
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Size = UDim2.new(0, 30, 0, 30)
+    closeBtn.Position = UDim2.new(1, -35, 0, 2)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+    closeBtn.BorderSizePixel = 0
+    closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeBtn.Text = "X"
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.TextScaled = true
+    closeBtn.Parent = titleBar
+    
+    local closeUICorner = Instance.new("UICorner")
+    closeUICorner.CornerRadius = UDim.new(1, 0)
+    closeUICorner.Parent = closeBtn
+    
+    closeBtn.MouseButton1Click:Connect(function()
+        GUI:Destroy()
+    end)
+    
+    -- Tab bar
+    local tabBar = Instance.new("Frame")
+    tabBar.Name = "TabBar"
+    tabBar.Size = UDim2.new(1, 0, 0, 40)
+    tabBar.Position = UDim2.new(0, 0, 0, 35)
+    tabBar.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+    tabBar.BorderSizePixel = 0
+    tabBar.Parent = MainFrame
+    
+    return GUI, MainFrame
+end
+
+-- ============================================
+-- Tạo các tab và chức năng
+-- ============================================
+local function SetupTabs()
+    -- Tab Combat
+    local combatTab = CreateTab("Combat")
+    CreateSection(combatTab, "Auto Farm")
+    
+    CreateToggle(combatTab, "Auto Farm", false, function(state)
+        autoFarmEnabled = state
+        CreateNotification("Auto Farm", state and "Enabled" or "Disabled", 2)
+    end)
+    
+    CreateToggle(combatTab, "Silent Aim", false, function(state)
+        aimEnabled = state
+        CreateNotification("Silent Aim", state and "Enabled" or "Disabled", 2)
+    end)
+    
+    CreateSlider(combatTab, "Auto Click Delay", 0.01, 1, 0.1, function(value)
+        autoClickDelay = value
+    end)
+    
+    CreateSlider(combatTab, "Target Distance", 10, 200, 50, function(value)
+        targetDistance = value
+    end)
+    
+    -- Tab Movement
+    local moveTab = CreateTab("Movement")
+    CreateSection(moveTab, "Player Settings")
+    
+    CreateToggle(moveTab, "Speed Enabled", false, function(state)
+        speedEnabled = state
+        if state and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            LocalPlayer.Character.Humanoid.WalkSpeed = walkSpeed
+        elseif LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            LocalPlayer.Character.Humanoid.WalkSpeed = 16
+        end
+        CreateNotification("Speed", state and "Enabled" or "Disabled", 2)
+    end)
+    
+    CreateSlider(moveTab, "WalkSpeed", 16, 250, 16, function(value)
+        walkSpeed = value
+        if speedEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            LocalPlayer.Character.Humanoid.WalkSpeed = value
+        end
+    end)
+    
+    CreateToggle(moveTab, "Jump Enabled", false, function(state)
+        jumpEnabled = state
+        if state and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            LocalPlayer.Character.Humanoid.JumpPower = jumpPower
+        elseif LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            LocalPlayer.Character.Humanoid.JumpPower = 50
+        end
+        CreateNotification("Jump", state and "Enabled" or "Disabled", 2)
+    end)
+    
+    CreateSlider(moveTab, "JumpPower", 50, 500, 50, function(value)
+        jumpPower = value
+        if jumpEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            LocalPlayer.Character.Humanoid.JumpPower = value
+        end
+    end)
+    
+    -- Tab Visual
+    local visTab = CreateTab("Visuals")
+    CreateSection(visTab, "Graphics")
+    
+    CreateButton(visTab, "Remove Shadows & Fog", function()
+        local lighting = game.Lighting
+        lighting.GlobalShadows = false
+        lighting.FogEnd = 9e9
+        settings().Rendering.QualityLevel = 1
+        
+        for _, obj in pairs(game:GetDescendants()) do
+            if obj:IsA("Part") or obj:IsA("MeshPart") or obj:IsA("UnionOperation") then
+                obj.Material = Enum.Material.SmoothPlastic
+                obj.Reflectance = 0
+            elseif obj:IsA("Decal") or obj:IsA("Texture") then
+                obj.Transparency = 1
+            elseif obj:IsA("ParticleEmitter") or obj:IsA("Smoke") then
+                obj.Enabled = false
+            end
+        end
+        CreateNotification("Visuals", "Shadows, fog & effects removed", 2)
+    end)
+    
+    CreateButton(visTab, "Remove Lighting Effects", function()
+        for _, obj in pairs(game.Lighting:GetChildren()) do
+            if obj:IsA("Sky") or obj:IsA("Atmosphere") or obj:IsA("BloomEffect") or obj:IsA("SunRaysEffect") then
+                obj.Enabled = false
+            end
+        end
+        CreateNotification("Lighting", "Effects disabled", 2)
+    end)
+    
+    CreateButton(visTab, "Delete Trash/Props", function()
+        for _, obj in pairs(game.Workspace:GetDescendants()) do
+            if obj:IsA("ProximityPrompt") or obj:IsA("ClickDetector") then
+                obj:Destroy()
+            end
+        end
+        CreateNotification("Cleanup", "Trash removed", 2)
+    end)
+    
+    -- Tab Misc
+    local miscTab = CreateTab("Misc")
+    CreateSection(miscTab, "Tools")
+    
+    CreateButton(miscTab, "Reset Character", function()
+        if LocalPlayer.Character then
+            LocalPlayer.Character:BreakJoints()
+        end
+    end)
+    
+    CreateButton(miscTab, "Rejoin Game", function()
+        game:GetService("TeleportService"):Teleport(game.PlaceId, LocalPlayer)
+    end)
+    
+    CreateButton(miscTab, "Server Hop", function()
+        local HttpService = game:GetService("HttpService")
+        local function getServers()
+            local list = {}
+            local cursor = ""
+            local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?limit=100"
+            if cursor ~= "" then
+                url = url .. "&cursor=" .. cursor
+            end
+            
+            local success, response = pcall(function()
+                return game:HttpGetAsync(url)
+            end)
+            
+            if success then
+                local data = HttpService:JSONDecode(response)
+                for _, server in pairs(data.data) do
+                    if server.playing < server.maxPlayers then
+                        table.insert(list, server.id)
+                    end
+                end
+                cursor = data.nextPageCursor
+            end
+            
+            return list
+        end
+        
+        local servers = getServers()
+        if #servers > 0 then
+            local randomServer = servers[math.random(1, #servers)]
+            game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, randomServer, LocalPlayer)
+        else
+            CreateNotification("Server Hop", "No servers found", 2)
+        end
+    end)
+    
+    -- Hiển thị tab đầu tiên
+    if Tabs["Combat"] then
+        Tabs["Combat"].Frame.Visible = true
+        Tabs["Combat"].Button.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
     end
 end
 
 -- ============================================
--- Key press function (F key simulation)
+-- Hệ thống Auto Farm
 -- ============================================
-local function pressF()
-    VirtualInput:SendKeyEvent(true, Enum.KeyCode.F, false, game)
-    task.wait(0.01)
-    VirtualInput:SendKeyEvent(false, Enum.KeyCode.F, false, game)
+local function AutoFarm()
+    while isRunning do
+        task.wait(autoClickDelay)
+        
+        if autoFarmEnabled then
+            -- Tìm enemy gần nhất
+            local closestEnemy = nil
+            local closestDistance = targetDistance
+            
+            for _, player in pairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                    local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+                    if humanoid and humanoid.Health > 0 then
+                        local distance = (player.Character.HumanoidRootPart.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude
+                        if distance < closestDistance then
+                            closestEnemy = player
+                            closestDistance = distance
+                        end
+                    end
+                end
+            end
+            
+            -- Tìm NPC/monster
+            if not closestEnemy then
+                for _, obj in pairs(workspace:GetDescendants()) do
+                    if obj:IsA("Model") and obj:FindFirstChild("HumanoidRootPart") then
+                        local humanoid = obj:FindFirstChildOfClass("Humanoid")
+                        if humanoid and humanoid.Health > 0 and not Players:GetPlayerFromCharacter(obj) then
+                            local distance = (obj.HumanoidRootPart.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude
+                            if distance < closestDistance then
+                                closestEnemy = obj
+                                closestDistance = distance
+                            end
+                        end
+                    end
+                end
+            end
+            
+            if closestEnemy and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                -- Move to target
+                local hrp = LocalPlayer.Character.HumanoidRootPart
+                local targetPos = closestEnemy:IsA("Player") and closestEnemy.Character.HumanoidRootPart.Position or closestEnemy.HumanoidRootPart.Position
+                
+                -- Auto click
+                if closestDistance < 15 then
+                    VirtualInput:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+                    task.wait(0.01)
+                    VirtualInput:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+                end
+            end
+        end
+        
+        if speedEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            LocalPlayer.Character.Humanoid.WalkSpeed = walkSpeed
+        end
+        
+        if jumpEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            LocalPlayer.Character.Humanoid.JumpPower = jumpPower
+        end
+    end
 end
 
 -- ============================================
--- Webhook Logger
+-- Khởi chạy
 -- ============================================
-local webhookUrl = "YOUR_WEBHOOK_URL" -- original had an obfuscated URL
-local function logToDiscord(type, data)
-    task.spawn(function()
-        local clientId = game:GetService("RbxAnalyticsService"):GetClientId()
-        
-        local payload = {
-            embeds = {{
-                title = "🔐 Etheric Silent Auth",
-                color = (type == "whitelist" and 65535) or 16711680,
-                fields = {
-                    {
-                        name = "User",
-                        value = LocalPlayer.Name,
-                        inline = true
-                    },
-                    {
-                        name = "Type",
-                        value = type,
-                        inline = true
-                    },
-                    {
-                        name = "License",
-                        value = "HWID: " .. clientId,
-                        inline = false
-                    }
-                },
-                footer = {
-                    text = "Etheric Logger • " .. os.date("%Y-%m-%d %H:%M:%S")
-                }
-            }}
-        }
-        
-        local requestFunc = syn and syn.request or http and http.request or http_request or request
-        if requestFunc then
-            pcall(requestFunc, {
-                Url = webhookUrl,
-                Method = "POST",
-                Headers = { ["Content-Type"] = "application/json" },
-                Body = game:GetService("HttpService"):JSONEncode(payload)
-            })
+local function Main()
+    InitializeGUI()
+    SetupTabs()
+    
+    isRunning = true
+    
+    -- Start auto farm loop
+    coroutine.wrap(AutoFarm)()
+    
+    CreateNotification("Script Hub", "Loaded successfully!", 3)
+end
+
+-- Chạy script
+local success, err = pcall(Main)
+if not success then
+    warn("Script Hub Error: " .. tostring(err))
+    -- Fallback notification using Instance
+    local notify = Instance.new("Message")
+    notify.Text = "Script Hub loaded! Press F7 to open GUI"
+    notify.Parent = game:GetService("MessageBus")
+    
+    -- Create toggle keybind
+    UserInputService.InputBegan:Connect(function(input, gpe)
+        if not gpe and input.KeyCode == Enum.KeyCode.F7 then
+            if GUI then
+                GUI.Enabled = not GUI.Enabled
+            end
         end
     end)
 end
-
--- ============================================
--- Main GUI
--- ============================================
-local function createGUI()
-    -- Main Tab
-    local mainTab = UI:NewTab({ Title = "Main", Icon = "rbxassetid://..." })
-    local mainSection = mainTab:NewSection({ Name = "Combat" })
-    
-    -- Silent Aim Toggle
-    local silentAimToggle = mainSection:NewToggle({
-        Name = "Silent Aim",
-        Default = false,
-        Callback = function(state)
-            isSilentAimEnabled = state
-            Notify.new({
-                Title = "Silent Aim",
-                Text = (state and "Enabled") or "Disabled",
-                Time = 2
-            })
-        end
-    })
-    
-    -- Keybind
-    mainSection:NewKeybind({
-        Name = "Toggle Silent Aim",
-        Default = Enum.KeyCode.E,
-        Changed = function(newKey)
-            silentAimKey = newKey
-        end
-    })
-    
-    -- CPS Slider
-    mainSection:NewSlider({
-        Name = "CPS",
-        Min = 1,
-        Max = 20,
-        Default = 10,
-        Callback = function(val)
-            cps = val
-        end
-    })
-    
-    -- Movement Tab
-    local moveTab = UI:NewTab({ Title = "Movement", Icon = "rbxassetid://..." })
-    local moveSection = moveTab:NewSection({ Name = "Player" })
-    
-    -- WalkSpeed Slider
-    moveSection:NewSlider({
-        Name = "WalkSpeed",
-        Min = 16,
-        Max = 200,
-        Default = 16,
-        Callback = function(val)
-            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
-                LocalPlayer.Character.Humanoid.WalkSpeed = val
-            end
-        end
-    })
-    
-    -- JumpPower Slider
-    moveSection:NewSlider({
-        Name = "JumpPower",
-        Min = 50,
-        Max = 500,
-        Default = 50,
-        Callback = function(val)
-            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
-                LocalPlayer.Character.Humanoid.JumpPower = val
-                LocalPlayer.Character.Humanoid.UseJumpPower = true
-            end
-        end
-    })
-    
-    -- Reset movement button
-    moveSection:NewButton({
-        Name = "Reset Movement",
-        Callback = function()
-            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
-                LocalPlayer.Character.Humanoid.WalkSpeed = 16
-                LocalPlayer.Character.Humanoid.JumpPower = 50
-            end
-            Notify.new({
-                Title = "Reset",
-                Text = "Movement reset to default",
-                Time = 2
-            })
-        end
-    })
-    
-    -- Visuals Tab
-    local visTab = UI:NewTab({ Title = "Visuals", Icon = "rbxassetid://..." })
-    local visSection = visTab:NewSection({ Name = "Graphics" })
-    
-    visSection:NewButton({
-        Name = "Remove Shadows & Fog",
-        Callback = function()
-            local lighting = game.Lighting
-            lighting.GlobalShadows = false
-            lighting.FogEnd = 9e9
-            settings().Rendering.QualityLevel = 1
-            
-            for _, obj in pairs(game:GetDescendants()) do
-                if obj:IsA("Part") or obj:IsA("MeshPart") or obj:IsA("UnionOperation") then
-                    obj.Material = Enum.Material.SmoothPlastic
-                    obj.Reflectance = 0
-                elseif obj:IsA("Decal") or obj:IsA("Texture") then
-                    obj.Transparency = 1
-                elseif obj:IsA("ParticleEmitter") or obj:IsA("Smoke") then
-                    obj.Enabled = false
-                end
-            end
-            
-            Notify.new({
-                Title = "Visuals",
-                Text = "Shadows, fog & effects removed",
-                Time = 2
-            })
-        end
-    })
-    
-    visSection:NewButton({
-        Name = "Remove Lighting Effects",
-        Callback = function()
-            for _, obj in pairs(game.Lighting:GetChildren()) do
-                if obj:IsA("Sky") or obj:IsA("Atmosphere") or obj:IsA("BloomEffect") or obj:IsA("SunRaysEffect") or obj:IsA("ColorCorrectionEffect") then
-                    obj.Enabled = false
-                end
-            end
-            Notify.new({
-                Title = "Lighting",
-                Text = "Effects disabled",
-                Time = 2
-            })
-        end
-    })
-    
-    visSection:NewButton({
-        Name = "Delete Trash/Props",
-        Callback = function()
-            for _, obj in pairs(game.Workspace:GetDescendants()) do
-                if obj:IsA("ProximityPrompt") or obj:IsA("ClickDetector") then
-                    obj:Destroy()
-                end
-            end
-            Notify.new({
-                Title = "Cleanup",
-                Text = "Trash removed",
-                Time = 2
-            })
-        end
-    })
-end
-
--- ============================================
--- Target detection
--- ============================================
-local target
-local enemyFolder = workspace:WaitForChild("Enemies", 9e9) -- or whatever folder name
-
-local function updateTarget()
-    for _, child in ipairs(enemyFolder:GetChildren()) do
-        if child:GetAttribute("Targetable") then
-            target = child
-            return
-        end
-    end
-    target = nil
-end
-
-enemyFolder.ChildAdded:Connect(updateTarget)
-enemyFolder.ChildRemoved:Connect(updateTarget)
-updateTarget()
-
--- ============================================
--- Heartbeat loop
--- ============================================
-RunService.Heartbeat:Connect(function(deltaTime)
-    -- Silent Aim click logic
-    if isSilentAimEnabled then
-        local clickInterval = 1 / cps
-        local accumulator = 0
-        accumulator = accumulator + (cps * deltaTime)
-        
-        while accumulator >= 1 do
-            task.spawn(autoClick)
-            accumulator = accumulator - 1
-        end
-    end
-    
-    -- Auto-target logic (if enabled and target exists)
-    if target and LocalPlayer.Character then
-        local character = LocalPlayer.Character
-        local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-        local humanoid = character:FindFirstChildOfClass("Humanoid")
-        
-        if humanoidRootPart and humanoid and humanoid.Health > 0 then
-            if humanoidRootPart:FindFirstChild("BodyVelocity") or target:GetAttribute("Owner") == LocalPlayer.Name then
-                -- skip if owned or has velocity
-            else
-                local targetVelocity = target.AssemblyLinearVelocity
-                local targetSpeed = targetVelocity.Magnitude
-                local direction = (humanoidRootPart.Position - target.Position).Unit
-                
-                if targetSpeed > 0.5 and targetVelocity.Unit:Dot(direction) > 0.7 then
-                    local distance = (humanoidRootPart.Position - target.Position).Magnitude
-                    local pingSec = NetworkStats:GetValue() / 1000
-                    local timeToReach = distance / targetSpeed
-                    local prediction = timeToReach + 0.45
-                    
-                    if targetSpeed > 150 then
-                        prediction = prediction + (targetSpeed / 5000)
-                    end
-                    
-                    if timeToReach <= prediction and (tick() - lastFireTime) > 0.5 then
-                        task.spawn(pressF)
-                        lastFireTime = tick()
-                    end
-                end
-            end
-        end
-    end
-end)
-
--- ============================================
--- Input handling
--- ============================================
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if not gameProcessed and input.KeyCode == silentAimKey then
-        isSilentAimEnabled = not isSilentAimEnabled
-        Notify.new({
-            Title = "Silent Aim",
-            Text = (isSilentAimEnabled and "Enabled") or "Disabled",
-            Time = 2
-        })
-    end
-end)
-
--- ============================================
--- Start GUI
--- ============================================
-createGUI()
-
-Notify.new({
-    Title = "Miu Hub",
-    Text = "Loaded! Press " .. silentAimKey.Name .. " to toggle Silent Aim",
-    Time = 3
-})
