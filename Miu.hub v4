@@ -1,0 +1,385 @@
+--[[
+  Script: Etheric Silent Auth / Silent Aim + GUI
+  (Deobfuscated & rewritten for readability)
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local VirtualInput = game:GetService("VirtualInputManager")
+local LocalPlayer = Players.LocalPlayer
+local NetworkStats = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]
+
+-- Decryption helper (removed xor layer since original used v7() for strings)
+-- Original v7() just XORs strings with a key for obfuscation
+local function decrypt(str, key)
+    local result = {}
+    for i = 1, #str, 2 do
+        local byte1 = string.byte(str, i)
+        local byte2 = string.byte(str, i + 1)
+        local keyByte = string.byte(key, (i % #key) + 1)
+        local decrypted = bit32.bxor(byte1, byte2, keyByte) % 256
+        table.insert(result, string.char(decrypted))
+    end
+    return table.concat(result)
+end
+
+-- Actually, let's just rewrite cleanly without the obfuscation layer.
+
+-- ============================================
+-- Setup
+-- ============================================
+local GuiLibrary = loadstring(game:HttpGetAsync("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
+-- Note: Above link is just a placeholder for a generic UI lib; original used a custom one.
+
+local Notify = GuiLibrary.Notification()
+local UI = GuiLibrary.new({ Title = "Etheric Hub" })
+
+-- ============================================
+-- Silent Aim Storage
+-- ============================================
+local silentAimTargets = {} -- stores {target, args} pairs
+local lastClickTime = 0
+local isSilentAimEnabled = false
+local cps = 10 -- clicks per second
+local silentAimKey = Enum.KeyCode.E
+local lastFireTime = 0
+
+-- Hook RemoteEvent firing to capture silent aim data
+local oldNamecall
+oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+    local method = getnamecallmethod()
+    
+    if method == "FireServer" and self:IsA("RemoteEvent") then
+        return function(...)
+            local args = {...}
+            if #args == 1 and type(args[0]) == "table" then
+                silentAimTargets[self] = args
+            end
+            return oldNamecall(self, ...)
+        end
+    end
+    return oldNamecall(self, ...)
+end))
+
+-- ============================================
+-- Auto-click function
+-- ============================================
+local function autoClick()
+    VirtualInput:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+    VirtualInput:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+    
+    local now = tick()
+    if now - lastClickTime >= 0.025 then
+        for remote, args in next, silentAimTargets do
+            task.spawn(function()
+                remote:FireServer(unpack(args[0]))
+            end)
+        end
+        lastClickTime = now
+    end
+end
+
+-- ============================================
+-- Key press function (F key simulation)
+-- ============================================
+local function pressF()
+    VirtualInput:SendKeyEvent(true, Enum.KeyCode.F, false, game)
+    task.wait(0.01)
+    VirtualInput:SendKeyEvent(false, Enum.KeyCode.F, false, game)
+end
+
+-- ============================================
+-- Webhook Logger
+-- ============================================
+local webhookUrl = "YOUR_WEBHOOK_URL" -- original had an obfuscated URL
+local function logToDiscord(type, data)
+    task.spawn(function()
+        local clientId = game:GetService("RbxAnalyticsService"):GetClientId()
+        
+        local payload = {
+            embeds = {{
+                title = "🔐 Etheric Silent Auth",
+                color = (type == "whitelist" and 65535) or 16711680,
+                fields = {
+                    {
+                        name = "User",
+                        value = LocalPlayer.Name,
+                        inline = true
+                    },
+                    {
+                        name = "Type",
+                        value = type,
+                        inline = true
+                    },
+                    {
+                        name = "License",
+                        value = "HWID: " .. clientId,
+                        inline = false
+                    }
+                },
+                footer = {
+                    text = "Etheric Logger • " .. os.date("%Y-%m-%d %H:%M:%S")
+                }
+            }}
+        }
+        
+        local requestFunc = syn and syn.request or http and http.request or http_request or request
+        if requestFunc then
+            pcall(requestFunc, {
+                Url = webhookUrl,
+                Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = game:GetService("HttpService"):JSONEncode(payload)
+            })
+        end
+    end)
+end
+
+-- ============================================
+-- Main GUI
+-- ============================================
+local function createGUI()
+    -- Main Tab
+    local mainTab = UI:NewTab({ Title = "Main", Icon = "rbxassetid://..." })
+    local mainSection = mainTab:NewSection({ Name = "Combat" })
+    
+    -- Silent Aim Toggle
+    local silentAimToggle = mainSection:NewToggle({
+        Name = "Silent Aim",
+        Default = false,
+        Callback = function(state)
+            isSilentAimEnabled = state
+            Notify.new({
+                Title = "Silent Aim",
+                Text = (state and "Enabled") or "Disabled",
+                Time = 2
+            })
+        end
+    })
+    
+    -- Keybind
+    mainSection:NewKeybind({
+        Name = "Toggle Silent Aim",
+        Default = Enum.KeyCode.E,
+        Changed = function(newKey)
+            silentAimKey = newKey
+        end
+    })
+    
+    -- CPS Slider
+    mainSection:NewSlider({
+        Name = "CPS",
+        Min = 1,
+        Max = 20,
+        Default = 10,
+        Callback = function(val)
+            cps = val
+        end
+    })
+    
+    -- Movement Tab
+    local moveTab = UI:NewTab({ Title = "Movement", Icon = "rbxassetid://..." })
+    local moveSection = moveTab:NewSection({ Name = "Player" })
+    
+    -- WalkSpeed Slider
+    moveSection:NewSlider({
+        Name = "WalkSpeed",
+        Min = 16,
+        Max = 200,
+        Default = 16,
+        Callback = function(val)
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+                LocalPlayer.Character.Humanoid.WalkSpeed = val
+            end
+        end
+    })
+    
+    -- JumpPower Slider
+    moveSection:NewSlider({
+        Name = "JumpPower",
+        Min = 50,
+        Max = 500,
+        Default = 50,
+        Callback = function(val)
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+                LocalPlayer.Character.Humanoid.JumpPower = val
+                LocalPlayer.Character.Humanoid.UseJumpPower = true
+            end
+        end
+    })
+    
+    -- Reset movement button
+    moveSection:NewButton({
+        Name = "Reset Movement",
+        Callback = function()
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+                LocalPlayer.Character.Humanoid.WalkSpeed = 16
+                LocalPlayer.Character.Humanoid.JumpPower = 50
+            end
+            Notify.new({
+                Title = "Reset",
+                Text = "Movement reset to default",
+                Time = 2
+            })
+        end
+    })
+    
+    -- Visuals Tab
+    local visTab = UI:NewTab({ Title = "Visuals", Icon = "rbxassetid://..." })
+    local visSection = visTab:NewSection({ Name = "Graphics" })
+    
+    visSection:NewButton({
+        Name = "Remove Shadows & Fog",
+        Callback = function()
+            local lighting = game.Lighting
+            lighting.GlobalShadows = false
+            lighting.FogEnd = 9e9
+            settings().Rendering.QualityLevel = 1
+            
+            for _, obj in pairs(game:GetDescendants()) do
+                if obj:IsA("Part") or obj:IsA("MeshPart") or obj:IsA("UnionOperation") then
+                    obj.Material = Enum.Material.SmoothPlastic
+                    obj.Reflectance = 0
+                elseif obj:IsA("Decal") or obj:IsA("Texture") then
+                    obj.Transparency = 1
+                elseif obj:IsA("ParticleEmitter") or obj:IsA("Smoke") then
+                    obj.Enabled = false
+                end
+            end
+            
+            Notify.new({
+                Title = "Visuals",
+                Text = "Shadows, fog & effects removed",
+                Time = 2
+            })
+        end
+    })
+    
+    visSection:NewButton({
+        Name = "Remove Lighting Effects",
+        Callback = function()
+            for _, obj in pairs(game.Lighting:GetChildren()) do
+                if obj:IsA("Sky") or obj:IsA("Atmosphere") or obj:IsA("BloomEffect") or obj:IsA("SunRaysEffect") or obj:IsA("ColorCorrectionEffect") then
+                    obj.Enabled = false
+                end
+            end
+            Notify.new({
+                Title = "Lighting",
+                Text = "Effects disabled",
+                Time = 2
+            })
+        end
+    })
+    
+    visSection:NewButton({
+        Name = "Delete Trash/Props",
+        Callback = function()
+            for _, obj in pairs(game.Workspace:GetDescendants()) do
+                if obj:IsA("ProximityPrompt") or obj:IsA("ClickDetector") then
+                    obj:Destroy()
+                end
+            end
+            Notify.new({
+                Title = "Cleanup",
+                Text = "Trash removed",
+                Time = 2
+            })
+        end
+    })
+end
+
+-- ============================================
+-- Target detection
+-- ============================================
+local target
+local enemyFolder = workspace:WaitForChild("Enemies", 9e9) -- or whatever folder name
+
+local function updateTarget()
+    for _, child in ipairs(enemyFolder:GetChildren()) do
+        if child:GetAttribute("Targetable") then
+            target = child
+            return
+        end
+    end
+    target = nil
+end
+
+enemyFolder.ChildAdded:Connect(updateTarget)
+enemyFolder.ChildRemoved:Connect(updateTarget)
+updateTarget()
+
+-- ============================================
+-- Heartbeat loop
+-- ============================================
+RunService.Heartbeat:Connect(function(deltaTime)
+    -- Silent Aim click logic
+    if isSilentAimEnabled then
+        local clickInterval = 1 / cps
+        local accumulator = 0
+        accumulator = accumulator + (cps * deltaTime)
+        
+        while accumulator >= 1 do
+            task.spawn(autoClick)
+            accumulator = accumulator - 1
+        end
+    end
+    
+    -- Auto-target logic (if enabled and target exists)
+    if target and LocalPlayer.Character then
+        local character = LocalPlayer.Character
+        local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        
+        if humanoidRootPart and humanoid and humanoid.Health > 0 then
+            if humanoidRootPart:FindFirstChild("BodyVelocity") or target:GetAttribute("Owner") == LocalPlayer.Name then
+                -- skip if owned or has velocity
+            else
+                local targetVelocity = target.AssemblyLinearVelocity
+                local targetSpeed = targetVelocity.Magnitude
+                local direction = (humanoidRootPart.Position - target.Position).Unit
+                
+                if targetSpeed > 0.5 and targetVelocity.Unit:Dot(direction) > 0.7 then
+                    local distance = (humanoidRootPart.Position - target.Position).Magnitude
+                    local pingSec = NetworkStats:GetValue() / 1000
+                    local timeToReach = distance / targetSpeed
+                    local prediction = timeToReach + 0.45
+                    
+                    if targetSpeed > 150 then
+                        prediction = prediction + (targetSpeed / 5000)
+                    end
+                    
+                    if timeToReach <= prediction and (tick() - lastFireTime) > 0.5 then
+                        task.spawn(pressF)
+                        lastFireTime = tick()
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- ============================================
+-- Input handling
+-- ============================================
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed and input.KeyCode == silentAimKey then
+        isSilentAimEnabled = not isSilentAimEnabled
+        Notify.new({
+            Title = "Silent Aim",
+            Text = (isSilentAimEnabled and "Enabled") or "Disabled",
+            Time = 2
+        })
+    end
+end)
+
+-- ============================================
+-- Start GUI
+-- ============================================
+createGUI()
+
+Notify.new({
+    Title = "Miu Hub",
+    Text = "Loaded! Press " .. silentAimKey.Name .. " to toggle Silent Aim",
+    Time = 3
+})
