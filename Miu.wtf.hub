@@ -1,208 +1,184 @@
---// SERVICES
+--// Simple Auto Parry GUI
+--// Mobile + PC Support
+
 local Players = game:GetService("Players")
-local RS = game:GetService("ReplicatedStorage")
-local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local UserInputService = game:GetService("UserInputService")
 
-local LP = Players.LocalPlayer
-local Character = LP.Character or LP.CharacterAdded:Wait()
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 
-LP.CharacterAdded:Connect(function(c)
-    Character = c
-end)
-
---// GUI
-local gui = Instance.new("ScreenGui")
-gui.Name = "BladeBallHub"
-gui.ResetOnSpawn = false
-gui.Parent = LP:WaitForChild("PlayerGui")
-
-local main = Instance.new("Frame")
-main.Parent = gui
-main.Size = UDim2.new(0,320,0,400)
-main.Position = UDim2.new(0.5,-160,0.5,-200)
-main.BackgroundColor3 = Color3.fromRGB(20,20,30)
-main.Active = true
-main.Draggable = true
-
-local corner = Instance.new("UICorner",main)
-
-local title = Instance.new("TextLabel")
-title.Parent = main
-title.Size = UDim2.new(1,0,0,35)
-title.BackgroundColor3 = Color3.fromRGB(30,30,45)
-title.Text = "Blade Ball GUI"
-title.TextColor3 = Color3.new(1,1,1)
-title.Font = Enum.Font.GothamBold
-title.TextSize = 16
-
-Instance.new("UICorner",title)
-
-local holder = Instance.new("ScrollingFrame")
-holder.Parent = main
-holder.Position = UDim2.new(0,5,0,40)
-holder.Size = UDim2.new(1,-10,1,-45)
-holder.CanvasSize = UDim2.new(0,0,0,600)
-holder.BackgroundTransparency = 1
-holder.BorderSizePixel = 0
-holder.ScrollBarThickness = 4
-
-local layout = Instance.new("UIListLayout")
-layout.Parent = holder
-layout.Padding = UDim.new(0,5)
-
---// STATES
+-- SETTINGS
 local AutoParry = false
-local Distance = 20
-local UseRage = false
+local ParryDistance = 18
+local Cooldown = 0.15
 
---// FUNCTIONS
-local function CreateButton(text,callback)
-    local b = Instance.new("TextButton")
-    b.Parent = holder
-    b.Size = UDim2.new(1,0,0,30)
-    b.BackgroundColor3 = Color3.fromRGB(40,40,60)
-    b.Text = text
-    b.TextColor3 = Color3.new(1,1,1)
-    b.Font = Enum.Font.GothamBold
-    b.TextSize = 13
+local LastParry = 0
 
-    Instance.new("UICorner",b)
+-- GUI
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "AutoParryGUI"
+ScreenGui.Parent = game.CoreGui
 
-    b.MouseButton1Click:Connect(callback)
+local Main = Instance.new("Frame")
+Main.Parent = ScreenGui
+Main.Size = UDim2.new(0, 170, 0, 100)
+Main.Position = UDim2.new(0.35, 0, 0.3, 0)
+Main.BackgroundColor3 = Color3.fromRGB(25,25,25)
+Main.BorderSizePixel = 0
+Main.Active = true
+Main.Draggable = true
 
-    return b
+local UICorner = Instance.new("UICorner", Main)
+
+local Title = Instance.new("TextLabel")
+Title.Parent = Main
+Title.Size = UDim2.new(1,0,0,30)
+Title.BackgroundTransparency = 1
+Title.Text = "AUTO PARRY"
+Title.TextColor3 = Color3.new(1,1,1)
+Title.Font = Enum.Font.SourceSansBold
+Title.TextSize = 22
+
+local Toggle = Instance.new("TextButton")
+Toggle.Parent = Main
+Toggle.Size = UDim2.new(0.8,0,0,40)
+Toggle.Position = UDim2.new(0.1,0,0.45,0)
+Toggle.BackgroundColor3 = Color3.fromRGB(170,0,0)
+Toggle.Text = "OFF"
+Toggle.TextColor3 = Color3.new(1,1,1)
+Toggle.Font = Enum.Font.SourceSansBold
+Toggle.TextSize = 24
+
+Instance.new("UICorner", Toggle)
+
+Toggle.MouseButton1Click:Connect(function()
+	AutoParry = not AutoParry
+
+	if AutoParry then
+		Toggle.Text = "ON"
+		Toggle.BackgroundColor3 = Color3.fromRGB(0,170,0)
+	else
+		Toggle.Text = "OFF"
+		Toggle.BackgroundColor3 = Color3.fromRGB(170,0,0)
+	end
+end)
+
+-- MOBILE DRAG FIX
+local dragging
+local dragInput
+local dragStart
+local startPos
+
+local function update(input)
+	local delta = input.Position - dragStart
+	Main.Position = UDim2.new(
+		startPos.X.Scale,
+		startPos.X.Offset + delta.X,
+		startPos.Y.Scale,
+		startPos.Y.Offset + delta.Y
+	)
 end
 
-local function Notify(txt)
-    game.StarterGui:SetCore("SendNotification",{
-        Title = "Blade Ball",
-        Text = txt,
-        Duration = 3
-    })
-end
+Main.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Touch
+	or input.UserInputType == Enum.UserInputType.MouseButton1 then
+		
+		dragging = true
+		dragStart = input.Position
+		startPos = Main.Position
 
---// AUTO PARRY
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
+		end)
+	end
+end)
+
+Main.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Touch
+	or input.UserInputType == Enum.UserInputType.MouseMovement then
+		dragInput = input
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if input == dragInput and dragging then
+		update(input)
+	end
+end)
+
+-- FIND BALL
 local function GetBall()
-    local Balls = workspace:FindFirstChild("Balls")
-
-    if not Balls then
-        return nil
-    end
-
-    for _,ball in pairs(Balls:GetChildren()) do
-        if ball:GetAttribute("realBall") then
-            return ball
-        end
-    end
+	for _, v in pairs(workspace:GetChildren()) do
+		if v:IsA("BasePart") and v:FindFirstChild("realBall") then
+			return v
+		end
+	end
 end
 
-RunService.Heartbeat:Connect(function()
-    if not AutoParry then
-        return
-    end
+-- PARRY
+local function DoParry()
+	VirtualInputManager:SendMouseButtonEvent(
+		0,
+		0,
+		0,
+		true,
+		game,
+		0
+	)
 
-    if not Character then
-        return
-    end
+	task.wait()
 
-    local HRP = Character:FindFirstChild("HumanoidRootPart")
-
-    if not HRP then
-        return
-    end
-
-    local ball = GetBall()
-
-    if not ball then
-        return
-    end
-
-    local dist = (ball.Position - HRP.Position).Magnitude
-
-    if dist <= Distance then
-        local remote = RS:FindFirstChild("Remotes")
-
-        if remote and remote:FindFirstChild("ParryButtonPress") then
-            remote.ParryButtonPress:Fire()
-        end
-
-        if UseRage then
-            if remote and remote:FindFirstChild("AbilityButtonPress") then
-                remote.AbilityButtonPress:Fire()
-            end
-        end
-    end
-end)
-
---// BUTTONS
-CreateButton("Toggle Auto Parry",function()
-    AutoParry = not AutoParry
-    Notify("Auto Parry: "..tostring(AutoParry))
-end)
-
-CreateButton("Toggle Rage",function()
-    UseRage = not UseRage
-    Notify("Rage: "..tostring(UseRage))
-end)
-
-CreateButton("Distance +5",function()
-    Distance += 5
-    Notify("Distance: "..Distance)
-end)
-
-CreateButton("Distance -5",function()
-    Distance -= 5
-
-    if Distance < 1 then
-        Distance = 1
-    end
-
-    Notify("Distance: "..Distance)
-end)
-
---// ABILITIES
-local abilities = {
-    "Dash",
-    "Forcefield",
-    "Raging Deflection",
-    "Shadow Step",
-    "Thunder Dash"
-}
-
-for _,ability in pairs(abilities) do
-    CreateButton("Equip "..ability,function()
-
-        local success,err = pcall(function()
-
-            RS.Remotes.Store.RequestEquipAbility:InvokeServer(ability)
-
-        end)
-
-        if success then
-            Notify("Equipped "..ability)
-        else
-            Notify("Failed")
-            warn(err)
-        end
-    end)
+	VirtualInputManager:SendMouseButtonEvent(
+		0,
+		0,
+		0,
+		false,
+		game,
+		0
+	)
 end
 
---// ANTI AFK
-CreateButton("Enable Anti AFK",function()
+-- MAIN LOOP
+RunService.RenderStepped:Connect(function()
+	if not AutoParry then
+		return
+	end
 
-    local vu = game:GetService("VirtualUser")
+	local Ball = GetBall()
+	if not Ball then
+		return
+	end
 
-    LP.Idled:Connect(function()
-        vu:Button2Down(Vector2.new(0,0),workspace.CurrentCamera.CFrame)
-        task.wait(1)
-        vu:Button2Up(Vector2.new(0,0),workspace.CurrentCamera.CFrame)
-    end)
+	local Character = LocalPlayer.Character
+	if not Character then
+		return
+	end
 
-    Notify("Anti AFK Enabled")
-end)
+	local HRP = Character:FindFirstChild("HumanoidRootPart")
+	if not HRP then
+		return
+	end
 
---// CLOSE
-CreateButton("Close GUI",function()
-    gui:Destroy()
+	local Distance = (Ball.Position - HRP.Position).Magnitude
+
+	local Velocity = Ball.AssemblyLinearVelocity
+
+	if Velocity.Magnitude < 1 then
+		return
+	end
+
+	local Direction = (HRP.Position - Ball.Position).Unit
+	local Dot = Velocity.Unit:Dot(Direction)
+
+	if Distance <= ParryDistance
+	and Dot > 0.7
+	and tick() - LastParry > Cooldown then
+
+		LastParry = tick()
+		DoParry()
+	end
 end)
