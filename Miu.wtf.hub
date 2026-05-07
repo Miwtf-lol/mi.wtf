@@ -1,0 +1,1106 @@
+-- ============================================
+-- MAIN LOADER - Blade Ball Enhanced GUI
+-- Original by: MIU.WTF
+-- ============================================
+
+-- ============================================
+-- MODULE 1: SERVICES & VARIABLES
+-- ============================================
+local Services = {
+    RunService = game:GetService("RunService"),
+    Workspace = game:GetService("Workspace"),
+    Players = game:GetService("Players"),
+    UserInputService = game:GetService("UserInputService"),
+    ReplicatedStorage = game:GetService("ReplicatedStorage"),
+    CoreGui = game:GetService("StarterGui"),
+    VirtualUser = game:GetService("VirtualUser"),
+    VirtualInput = game:GetService("VirtualInputManager"),
+    TweenService = game:GetService("TweenService"),
+}
+
+local State = {
+    localPlayer = Services.Players.LocalPlayer,
+    character = nil,
+    abilitiesFolder = nil,
+    heartbeatConnection = nil,
+    UseRage = false,
+    sliderValue = 20,
+    stayspawnshit = false,
+    TpSpawn = false,
+    FakePlatform = false,
+    AntiAfkLol = false,
+    breakballerbelike = false,
+    OpenExplosionCrate = false,
+    OpenSwordCrate = false,
+    focusedBall = nil,
+}
+
+-- Init character
+State.character = State.localPlayer.Character or State.localPlayer.CharacterAdded:Wait()
+State.abilitiesFolder = State.character:WaitForChild("Abilities")
+
+State.localPlayer.CharacterAdded:Connect(function(newChar)
+    State.character = newChar
+    State.abilitiesFolder = newChar:WaitForChild("Abilities")
+end)
+
+-- Tạo AbilityThingyk1212
+local function createAbilityValue()
+    local existing = Services.Workspace:FindFirstChild("AbilityThingyk1212")
+    if existing then existing:Remove(); task.wait(0.1) end
+    local val = Instance.new("StringValue")
+    val.Parent = Services.Workspace
+    val.Name = "AbilityThingyk1212"
+    val.Value = "Dash"
+end
+createAbilityValue()
+
+-- ============================================
+-- MODULE 2: AUTO PARRY ENGINE
+-- ============================================
+local AutoParryEngine = {}
+
+function AutoParryEngine.chooseNewFocusedBall()
+    local ballsFolder = Services.Workspace:FindFirstChild("Balls")
+    if not ballsFolder then return nil end
+    
+    for _, ball in ipairs(ballsFolder:GetChildren()) do
+        if ball:GetAttribute("realBall") == true or ball:GetAttribute("target") ~= nil then
+            State.focusedBall = ball
+            return ball
+        end
+    end
+    return nil
+end
+
+function AutoParryEngine.getDynamicThreshold(velMagnitude)
+    local BASE_THRESHOLD = 0.15
+    if velMagnitude > 60 then
+        return math.max(0.20, BASE_THRESHOLD - (velMagnitude * 0.050))
+    else
+        return math.min(0.01, BASE_THRESHOLD + (velMagnitude * 0.1))
+    end
+end
+
+function AutoParryEngine.timeUntilImpact(ballVel, dist, playerVel)
+    local dir = (State.character.HumanoidRootPart.Position - State.focusedBall.Position).Unit
+    local velTowards = ballVel:Dot(dir) - playerVel:Dot(dir)
+    if velTowards <= 0 then return math.huge end
+    return (dist - State.sliderValue) / velTowards
+end
+
+function AutoParryEngine.checkBallDistance()
+    if not State.character or not State.character:FindFirstChild("Highlight") then return end
+    if not State.focusedBall or not State.focusedBall.Parent then
+        AutoParryEngine.chooseNewFocusedBall()
+    end
+    if not State.focusedBall then return end
+
+    local charPos = State.character.PrimaryPart.Position
+    local charVel = State.character.PrimaryPart.Velocity
+    local ball = State.focusedBall
+    local dist = (ball.Position - charPos).Magnitude
+    local velTowards = ball.Velocity:Dot((charPos - ball.Position).Unit)
+    
+    local parryRemote = Services.ReplicatedStorage.Remotes.ParryButtonPress
+    local abilityRemote = Services.ReplicatedStorage.Remotes.AbilityButtonPress
+
+    if dist < 10 then
+        parryRemote:Fire()
+        return
+    end
+
+    local time = AutoParryEngine.timeUntilImpact(ball.Velocity, dist, charVel)
+    local threshold = AutoParryEngine.getDynamicThreshold(velTowards)
+    
+    if time < threshold then
+        if State.character.Abilities["Raging Deflection"].Enabled and State.UseRage then
+            abilityRemote:Fire()
+            if State.character:FindFirstChildOfClass("Humanoid") and 
+               State.character.Humanoid.WalkSpeed ~= 0 then
+                parryRemote:Fire()
+            end
+        else
+            parryRemote:Fire()
+        end
+    end
+end
+
+function AutoParryEngine.start()
+    AutoParryEngine.chooseNewFocusedBall()
+    State.heartbeatConnection = Services.RunService.Heartbeat:Connect(AutoParryEngine.checkBallDistance)
+end
+
+function AutoParryEngine.stop()
+    if State.heartbeatConnection then
+        State.heartbeatConnection:Disconnect()
+        State.heartbeatConnection = nil
+    end
+end
+
+-- ============================================
+-- MODULE 3: ABILITY SWITCHER
+-- ============================================
+local AbilitySwitcher = {}
+
+local ABILITIES = {
+    "Dash", "Forcefield", "Invisibility", "Platform",
+    "Raging Deflection", "Shadow Step", "Super Jump",
+    "Telekinesis", "Thunder Dash", "Rapture"
+}
+
+function AbilitySwitcher.switchTo(abilityName)
+    local args = { [1] = abilityName }
+    Services.ReplicatedStorage.Remotes.Store.RequestEquipAbility:InvokeServer(unpack(args))
+    Services.ReplicatedStorage.Remotes.Store.GetOwnedAbilities:InvokeServer()
+    Services.ReplicatedStorage.Remotes.kebaind:FireServer()
+    
+    local existing = Services.Workspace:FindFirstChild("AbilityThingyk1212")
+    if existing then existing:Remove() end
+    
+    local val = Instance.new("StringValue")
+    val.Parent = Services.Workspace
+    val.Name = "AbilityThingyk1212"
+    val.Value = abilityName
+
+    local abilities = State.abilitiesFolder:GetChildren()
+    for _, v in ipairs(abilities) do
+        if v.Enabled then
+            for _, b in ipairs(abilities) do
+                local abilVal = Services.Workspace:FindFirstChild("AbilityThingyk1212")
+                if b.Name == abilVal.Value then
+                    v.Enabled = false
+                    b.Enabled = true
+                    return
+                end
+            end
+        end
+    end
+end
+
+-- ============================================
+-- MODULE 4: UPGRADES MODIFIER
+-- ============================================
+local UpgradesModifier = {}
+
+local UPGRADE_NAMES = {
+    "Dash", "Forcefield", "Invisibility", "Platform",
+    "Shadow Step", "Super Jump", "Thunder Dash",
+    "Raging Deflection", "Telekinesis"
+}
+
+function UpgradesModifier.setValue(name, value)
+    local upg = State.localPlayer.Upgrades:FindFirstChild(name)
+    if upg then upg.Value = value end
+end
+
+function UpgradesModifier.setAllPositive()
+    for _, name in ipairs(UPGRADE_NAMES) do
+        UpgradesModifier.setValue(name, 999999999999999999)
+    end
+end
+
+function UpgradesModifier.setAllNegative()
+    for _, name in ipairs(UPGRADE_NAMES) do
+        UpgradesModifier.setValue(name, -999999999999999999)
+    end
+end
+
+-- ============================================
+-- MODULE 5: CRATE OPENER
+-- ============================================
+local CrateOpener = {}
+
+function CrateOpener.openExplosion()
+    local _, result = Services.ReplicatedStorage.Remotes.Store.RequestOpenExplosionBox:InvokeServer()
+    Services.CoreGui:SetCore("SendNotification", {
+        Title = "Explosion Crate", Text = result, Duration = 3
+    })
+    return result
+end
+
+function CrateOpener.openWeapon()
+    local _, result = Services.ReplicatedStorage.Remotes.Store.RequestOpenSwordBox:InvokeServer()
+    Services.CoreGui:SetCore("SendNotification", {
+        Title = "Weapon Crate", Text = result, Duration = 3
+    })
+    return result
+end
+
+-- ============================================
+-- MODULE 6: TELEKINESIS FARM
+-- ============================================
+local TelekinesisFarm = {}
+
+function TelekinesisFarm.useTelekinesis()
+    local args = {
+        [1] = CFrame.new(-177.78134155273438, 22.17252540588379, -6.560810089111328) * CFrame.Angles(-0.5510220527648926, 0.4792300760746002, 0.2761117219924927),
+        [2] = {
+            ["1390589899"] = Vector3.new(-3606.42333984375, 309.64959716796875, 15.07781982421875),
+            ["95606930"] = Vector3.new(1109.630615234375, 97.52566528320312, 164.15850830078125),
+            ["2428748976"] = Vector3.new(-393.8770751953125, 114.9974365234375, 104.13533020019531),
+            ["138302338"] = Vector3.new(782.9514770507812, 90.34832763671875, 216.39634704589844),
+            ["game.Players.LocalPlayer.UserId"] = Vector3.new(721.59521484375, 437.5107421875, 13.196876525878906),
+            ["460529380"] = Vector3.new(3050.986572265625, -402.539306640625, -10.369964599609375),
+            ["3389515036"] = Vector3.new(-24216.498046875, 2629.838134765625, 1.3838348388671875),
+            ["253804325"] = Vector3.new(-277.2596435546875, -125.47763061523438, 44.2408447265625),
+            ["2466009586"] = Vector3.new(1826.3505859375, 865.5350341796875, -84.64073944091797),
+            ["534937301"] = Vector3.new(539.1710205078125, 96.26556396484375, 171.3994140625),
+            ["1697434972"] = Vector3.new(1627.478759765625, 611.9812622070312, -123.97309112548828),
+            ["4394721359"] = Vector3.new(1459.405029296875, 138.78118896484375, 68.75445556640625)
+        },
+        [3] = { [1] = 800, [2] = 378 }
+    }
+    Services.ReplicatedStorage.Remotes.Telekinesis:FireServer(unpack(args))
+end
+
+function TelekinesisFarm.breakBall()
+    Services.ReplicatedStorage.Remotes.Telekinesis:FireServer()
+end
+
+function TelekinesisFarm.resetCooldown()
+    State.character.HumanoidRootPart.CFrame = CFrame.new(-10002.240021, 123.299988, 200.441544)
+    task.wait(1)
+    State.character.Humanoid.Health = 0
+end
+
+-- ============================================
+-- MODULE 7: SKINS ENGINE
+-- ============================================
+local SkinsEngine = {}
+
+function SkinsEngine.applyEmpyreanGreatblade()
+    local char = State.localPlayer.Character
+    local sword = char:FindFirstChildOfClass("Model")
+    local katanaMesh = sword:FindFirstChild("KatanaMesh")
+    local empyrean = Services.ReplicatedStorage.Misc.Swords.Limited["Empyrean Greatblade"]
+    local meshClone = empyrean["Meshes/Sword"]:Clone()
+    
+    meshClone.Anchored = false
+    meshClone.Parent = sword
+    meshClone.CFrame = katanaMesh.CFrame
+    
+    local weld = Instance.new("Weld")
+    weld.Parent = meshClone
+    weld.Part0 = meshClone
+    weld.Part1 = katanaMesh
+    katanaMesh.Transparency = 1
+    
+    char.HumanoidRootPart.CFrame = CFrame.new(-233.710556, 123.299973, 203.648102)
+    task.wait(0.1)
+    meshClone.Rotation = Vector3.new(-75.41799926757812, -90, 0)
+end
+
+function SkinsEngine.applyOniClaws()
+    local char = State.localPlayer.Character
+    local sword = char:FindFirstChildOfClass("Model")
+    local claws = Services.ReplicatedStorage.Misc.Swords.Limited["Oni Claws"]:Clone()
+    local katanaMesh = sword:FindFirstChild("KatanaMesh")
+    
+    claws.Parent = sword
+    
+    local weldL = Instance.new("Weld")
+    weldL.Name = "Left Arm"
+    weldL.Parent = claws.Cestus
+    weldL.Part0 = claws.Cestus.zaza
+    weldL.Part1 = char:FindFirstChild("Left Arm")
+    
+    local weldR = Instance.new("Weld")
+    weldR.Name = "Right Arm"
+    weldR.Parent = claws.Cestus2
+    weldR.Part0 = claws.Cestus2.zaza
+    weldR.Part1 = char:FindFirstChild("Right Arm")
+    
+    katanaMesh.Transparency = 1
+    for _, part in ipairs({"sord", "handle", "WhiteFlameCharges", "Excalibur"}) do
+        local obj = sword:FindFirstChild(part)
+        if obj then obj:Remove() end
+    end
+end
+
+function SkinsEngine.applyFunniOniClaws()
+    local char = State.localPlayer.Character
+    local sword = char:FindFirstChildOfClass("Model")
+    local claws = Services.ReplicatedStorage.Misc.Swords.Limited["Oni Claws"]:Clone()
+    local claws2 = Services.ReplicatedStorage.Misc.Swords.Limited["Oni Claws"]:Clone()
+    local katanaMesh = sword:FindFirstChild("KatanaMesh")
+    
+    claws.Parent = sword
+    local wL = Instance.new("Weld"); wL.Name = "Left Arm"; wL.Parent = claws.Cestus
+    wL.Part0 = claws.Cestus.zaza; wL.Part1 = char:FindFirstChild("Left Arm")
+    
+    local wR = Instance.new("Weld"); wR.Name = "Right Arm"; wR.Parent = claws.Cestus2
+    wR.Part0 = claws.Cestus2.zaza; wR.Part1 = char:FindFirstChild("Right Arm")
+    
+    claws2.Parent = sword
+    local wL2 = Instance.new("Weld"); wL2.Name = "Left Arm2"; wL2.Parent = claws2.Cestus2
+    wL2.Part0 = claws2.Cestus2.zaza; wL2.Part1 = char:FindFirstChild("Left Arm")
+    
+    local wR2 = Instance.new("Weld"); wR2.Name = "Right Arm2"; wR2.Parent = claws2.Cestus
+    wR2.Part0 = claws2.Cestus.zaza; wR2.Part1 = char:FindFirstChild("Right Arm")
+    
+    katanaMesh.Transparency = 1
+    for _, p in ipairs({"sord", "handle", "WhiteFlameCharges", "Excalibur"}) do
+        local o = sword:FindFirstChild(p)
+        if o then o:Remove() end
+    end
+end
+
+function SkinsEngine.applyGodSaber()
+    local char = State.localPlayer.Character
+    local sword = char:FindFirstChildOfClass("Model")
+    local katanaMesh = sword:FindFirstChild("KatanaMesh")
+    local godsaber = Services.ReplicatedStorage.Misc.Swords.Unique.Godsaber
+    
+    if sword:FindFirstChild("Godsaber") then
+        sword.Godsaber:Remove(); task.wait(0.1)
+    end
+    
+    local clone = godsaber:Clone()
+    clone.Parent = sword
+    
+    local katMesh = godsaber:FindFirstChild("KatanaMesh")
+    local handle = godsaber:FindFirstChild("handle")
+    local sord = godsaber:FindFirstChild("sord")
+    local blade = godsaber:FindFirstChild("Blade")
+    local main = blade and blade:FindFirstChild("Main")
+    
+    if katMesh then katMesh.Anchored = false end
+    if handle then handle.Anchored = false end
+    if sord then sord.Anchored = false end
+    if blade then blade.Anchored = false end
+    if main then main.Anchored = false end
+    
+    if sord then sord.CFrame = katanaMesh.CFrame end
+    if handle then handle.CFrame = katanaMesh.CFrame + Vector3.new(0, 0.6, -1.5) end
+    if katMesh then 
+        katMesh.CFrame = katanaMesh.CFrame
+        local wc = katMesh:FindFirstChild("WeldConstraint")
+        if wc then wc.Part1 = char:FindFirstChild("Left Leg") end
+    end
+    if main then main.CFrame = katanaMesh.CFrame end
+    
+    char.HumanoidRootPart.CFrame = CFrame.new(-233.710556, 123.299973, 203.648102)
+    task.wait(0.2)
+    
+    if main then main.Rotation = Vector3.new(112, 0, 90) end
+    if handle then handle.Rotation = Vector3.new(-159, 0, 100) end
+    
+    katanaMesh.Transparency = 1
+    for _, p in ipairs({"sord", "handle", "WhiteFlameCharges", "Excalibur"}) do
+        local o = sword:FindFirstChild(p)
+        if o then o:Remove() end
+    end
+end
+
+-- ============================================
+-- MODULE 8: GUI BUILDER - Draggable & Minimizable
+-- ============================================
+local GUI_BUILDER = {}
+
+function GUI_BUILDER.createGUI()
+    -- ScreenGui
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "BladeBall_GUI"
+    screenGui.Parent = State.localPlayer:WaitForChild("PlayerGui")
+    screenGui.ResetOnSpawn = false
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    
+    -- Main Frame
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Name = "MainFrame"
+    mainFrame.Size = UDim2.new(0, 400, 0, 520)
+    mainFrame.Position = UDim2.new(0.5, -200, 0.5, -260)
+    mainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+    mainFrame.BorderSizePixel = 0
+    mainFrame.ClipsDescendants = true
+    mainFrame.Parent = screenGui
+    
+    local mainCorner = Instance.new("UICorner")
+    mainCorner.CornerRadius = UDim.new(0, 10)
+    mainCorner.Parent = mainFrame
+    
+    -- Background Image
+    local bgImage = Instance.new("ImageLabel")
+    bgImage.Name = "Background"
+    bgImage.Size = UDim2.new(1, 0, 1, 0)
+    bgImage.BackgroundTransparency = 1
+    bgImage.Image = "rbxassetid://135283977825181"
+    bgImage.ImageColor3 = Color3.fromRGB(255, 255, 255)
+    bgImage.ImageTransparency = 0.15
+    bgImage.ScaleType = Enum.ScaleType.Crop
+    bgImage.Parent = mainFrame
+    bgImage.ZIndex = 0
+    
+    -- Overlay for readability
+    local overlay = Instance.new("Frame")
+    overlay.Name = "Overlay"
+    overlay.Size = UDim2.new(1, 0, 1, 0)
+    overlay.BackgroundColor3 = Color3.fromRGB(10, 10, 20)
+    overlay.BackgroundTransparency = 0.25
+    overlay.BorderSizePixel = 0
+    overlay.Parent = mainFrame
+    overlay.ZIndex = 1
+    
+    -- Shadow
+    local shadow = Instance.new("ImageLabel")
+    shadow.Name = "Shadow"
+    shadow.Size = UDim2.new(1, 30, 1, 30)
+    shadow.Position = UDim2.new(0, -15, 0, -15)
+    shadow.BackgroundTransparency = 1
+    shadow.Image = "rbxassetid://6014261993"
+    shadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
+    shadow.ImageTransparency = 0.7
+    shadow.ScaleType = Enum.ScaleType.Slice
+    shadow.SliceCenter = Rect.new(15, 15, 15, 15)
+    shadow.Parent = mainFrame
+    shadow.ZIndex = -1
+    
+    -- Title Bar
+    local titleBar = Instance.new("Frame")
+    titleBar.Name = "TitleBar"
+    titleBar.Size = UDim2.new(1, 0, 0, 40)
+    titleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 40)
+    titleBar.BackgroundTransparency = 0.1
+    titleBar.BorderSizePixel = 0
+    titleBar.ZIndex = 2
+    titleBar.Parent = mainFrame
+    
+    local titleCorner = Instance.new("UICorner")
+    titleCorner.CornerRadius = UDim.new(0, 10)
+    titleCorner.Parent = titleBar
+    
+    -- Fix top corners
+    local topFill = Instance.new("Frame")
+    topFill.Size = UDim2.new(1, 0, 0, 10)
+    topFill.Position = UDim2.new(0, 0, 0, -10)
+    topFill.BackgroundColor3 = Color3.fromRGB(20, 20, 40)
+    topFill.BackgroundTransparency = 0.1
+    topFill.BorderSizePixel = 0
+    topFill.Parent = titleBar
+    
+    -- Title text (static)
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Name = "Title"
+    titleLabel.Size = UDim2.new(1, -80, 1, 0)
+    titleLabel.Position = UDim2.new(0, 12, 0, 0)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text = "  Blade Ball"
+    titleLabel.TextColor3 = Color3.fromRGB(200, 200, 255)
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextSize = 16
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.ZIndex = 3
+    titleLabel.Parent = titleBar
+    
+    -- ===== MIU.WTF ANIMATED TEXT =====
+    local miuText = Instance.new("TextLabel")
+    miuText.Name = "MIUText"
+    miuText.Size = UDim2.new(0, 120, 1, 0)
+    miuText.Position = UDim2.new(0, 12, 0, 0)
+    miuText.BackgroundTransparency = 1
+    miuText.Text = "MIU.WTF"
+    miuText.TextColor3 = Color3.fromRGB(255, 180, 50)
+    miuText.Font = Enum.Font.GothamBlack
+    miuText.TextSize = 14
+    miuText.TextXAlignment = Enum.TextXAlignment.Left
+    miuText.TextTransparency = 0
+    miuText.ZIndex = 4
+    miuText.Parent = titleBar
+    
+    -- Animate MIU.WTF moving left-right across title bar
+    spawn(function()
+        local startX = 12
+        local endX = titleBar.AbsoluteSize.X - 130
+        local goingForward = true
+        
+        while screenGui and screenGui.Parent do
+            -- Recalculate end position in case window resized
+            endX = titleBar.AbsoluteSize.X - 130
+            if endX < startX then endX = startX + 50 end
+            
+            local targetX = goingForward and endX or startX
+            
+            -- Tween to target position
+            local tweenInfo = TweenInfo.new(
+                3 + math.random() * 2,  -- Random duration 3-5 sec
+                Enum.EasingStyle.Sine,
+                Enum.EasingDirection.InOut
+            )
+            
+            local tween = Services.TweenService:Create(
+                miuText,
+                tweenInfo,
+                { Position = UDim2.new(0, targetX, 0, 0) }
+            )
+            tween:Play()
+            tween.Completed:Wait()
+            
+            goingForward = not goingForward
+            task.wait(0.3)
+        end
+    end)
+    
+    -- Minimize Button
+    local minBtn = Instance.new("ImageButton")
+    minBtn.Name = "MinimizeBtn"
+    minBtn.Size = UDim2.new(0, 26, 0, 26)
+    minBtn.Position = UDim2.new(1, -66, 0, 7)
+    minBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
+    minBtn.Image = "rbxassetid://6031094668"
+    minBtn.ImageColor3 = Color3.fromRGB(255, 200, 80)
+    minBtn.ZIndex = 3
+    minBtn.Parent = titleBar
+    
+    local minCorner = Instance.new("UICorner")
+    minCorner.CornerRadius = UDim.new(0, 5)
+    minCorner.Parent = minBtn
+    
+    -- Close Button
+    local closeBtn = Instance.new("ImageButton")
+    closeBtn.Name = "CloseBtn"
+    closeBtn.Size = UDim2.new(0, 26, 0, 26)
+    closeBtn.Position = UDim2.new(1, -34, 0, 7)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(60, 35, 35)
+    closeBtn.Image = "rbxassetid://6031094668"
+    closeBtn.ImageColor3 = Color3.fromRGB(255, 80, 80)
+    closeBtn.ZIndex = 3
+    closeBtn.Parent = titleBar
+    
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(0, 5)
+    closeCorner.Parent = closeBtn
+    
+    -- Content Container (Scrollable)
+    local contentContainer = Instance.new("ScrollingFrame")
+    contentContainer.Name = "Content"
+    contentContainer.Size = UDim2.new(1, -10, 1, -50)
+    contentContainer.Position = UDim2.new(0, 5, 0, 45)
+    contentContainer.BackgroundTransparency = 1
+    contentContainer.BorderSizePixel = 0
+    contentContainer.ScrollBarThickness = 4
+    contentContainer.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 140)
+    contentContainer.CanvasSize = UDim2.new(0, 0, 0, 0)
+    contentContainer.ZIndex = 2
+    contentContainer.Parent = mainFrame
+    
+    local uiList = Instance.new("UIListLayout")
+    uiList.Padding = UDim.new(0, 4)
+    uiList.Parent = contentContainer
+    
+    local uiPadding = Instance.new("UIPadding")
+    uiPadding.PaddingLeft = UDim.new(0, 5)
+    uiPadding.PaddingRight = UDim.new(0, 5)
+    uiPadding.PaddingTop = UDim.new(0, 5)
+    uiPadding.Parent = contentContainer
+    
+    -- Make Title Bar Draggable
+    local dragging = false
+    local dragStart, startPos
+    
+    titleBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or 
+           input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = mainFrame.Position
+            titleBar.Active = true
+        end
+    end)
+    
+    local dragConnection
+    dragConnection = Services.UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or
+           input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            mainFrame.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+    
+    Services.UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or
+           input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    
+    -- Minimize Functionality
+    local minimized = false
+    local originalSize = mainFrame.Size
+    
+    minBtn.MouseButton1Click:Connect(function()
+        minimized = not minimized
+        if minimized then
+            mainFrame.Size = UDim2.new(mainFrame.Size.X.Scale, mainFrame.Size.X.Offset, 0, 40)
+            contentContainer.Visible = false
+            bgImage.Visible = false
+            overlay.Visible = false
+            minBtn.ImageColor3 = Color3.fromRGB(100, 255, 100)
+        else
+            mainFrame.Size = originalSize
+            contentContainer.Visible = true
+            bgImage.Visible = true
+            overlay.Visible = true
+            minBtn.ImageColor3 = Color3.fromRGB(255, 200, 80)
+        end
+    end)
+    
+    -- Close Functionality
+    closeBtn.MouseButton1Click:Connect(function()
+        -- Clean up all connections
+        if State.heartbeatConnection then
+            State.heartbeatConnection:Disconnect()
+            State.heartbeatConnection = nil
+        end
+        screenGui:Destroy()
+    end)
+    
+    return {
+        gui = screenGui,
+        frame = mainFrame,
+        content = contentContainer,
+        layout = uiList,
+        titleBar = titleBar,
+        minBtn = minBtn,
+        closeBtn = closeBtn,
+    }
+end
+
+-- ============================================
+-- Create the GUI
+-- ============================================
+local GUI = GUI_BUILDER.createGUI()
+local content = GUI.content
+
+-- ============================================
+-- GUI Helper Functions
+-- ============================================
+
+-- Helper: Create section header
+local function addSection(text)
+    local section = Instance.new("TextLabel")
+    section.Size = UDim2.new(1, 0, 0, 22)
+    section.BackgroundColor3 = Color3.fromRGB(40, 40, 65)
+    section.BackgroundTransparency = 0.2
+    section.Text = text
+    section.TextColor3 = Color3.fromRGB(255, 255, 255)
+    section.Font = Enum.Font.GothamBold
+    section.TextSize = 13
+    section.TextXAlignment = Enum.TextXAlignment.Left
+    section.ZIndex = 2
+    
+    local pad = Instance.new("UIPadding")
+    pad.PaddingLeft = UDim.new(0, 8)
+    pad.Parent = section
+    
+    local secCorner = Instance.new("UICorner")
+    secCorner.CornerRadius = UDim.new(0, 4)
+    secCorner.Parent = section
+    
+    section.Parent = content
+    return section
+end
+
+-- Helper: Create toggle
+local function addToggle(text, default, callback)
+    local container = Instance.new("Frame")
+    container.Size = UDim2.new(1, 0, 0, 30)
+    container.BackgroundColor3 = Color3.fromRGB(30, 30, 50)
+    container.BackgroundTransparency = 0.3
+    container.ZIndex = 2
+    
+    local conCorner = Instance.new("UICorner")
+    conCorner.CornerRadius = UDim.new(0, 4)
+    conCorner.Parent = container
+    
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -40, 1, 0)
+    label.Position = UDim2.new(0, 8, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text = text
+    label.TextColor3 = Color3.fromRGB(200, 200, 220)
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 12
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.ZIndex = 3
+    label.Parent = container
+    
+    local btn = Instance.new("ImageButton")
+    btn.Name = "ToggleBtn"
+    btn.Size = UDim2.new(0, 22, 0, 22)
+    btn.Position = UDim2.new(1, -30, 0, 4)
+    btn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+    btn.ZIndex = 3
+    btn.Parent = container
+    
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 4)
+    btnCorner.Parent = btn
+    
+    local isOn = default or false
+    
+    local function updateVisual()
+        if isOn then
+            btn.BackgroundColor3 = Color3.fromRGB(60, 180, 80)
+            btn.Image = "rbxassetid://6031094668"
+            btn.ImageColor3 = Color3.fromRGB(255, 255, 255)
+        else
+            btn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+            btn.Image = ""
+        end
+    end
+    
+    updateVisual()
+    
+    btn.MouseButton1Click:Connect(function()
+        isOn = not isOn
+        updateVisual()
+        if callback then task.spawn(callback, isOn) end
+    end)
+    
+    container.Parent = content
+    return { container = container, btn = btn, set = function(v) isOn = v; updateVisual() end }
+end
+
+-- Helper: Create button
+local function addButton(text, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 28)
+    btn.BackgroundColor3 = Color3.fromRGB(50, 50, 80)
+    btn.Text = text
+    btn.TextColor3 = Color3.fromRGB(200, 200, 255)
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 12
+    btn.AutoButtonColor = false
+    btn.ZIndex = 2
+    
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 4)
+    btnCorner.Parent = btn
+    
+    btn.MouseEnter:Connect(function()
+        btn.BackgroundColor3 = Color3.fromRGB(65, 65, 100)
+    end)
+    btn.MouseLeave:Connect(function()
+        btn.BackgroundColor3 = Color3.fromRGB(50, 50, 80)
+    end)
+    btn.MouseButton1Click:Connect(function()
+        btn.BackgroundColor3 = Color3.fromRGB(40, 180, 80)
+        task.wait(0.1)
+        btn.BackgroundColor3 = Color3.fromRGB(50, 50, 80)
+        if callback then task.spawn(callback) end
+    end)
+    
+    btn.Parent = content
+    return btn
+end
+
+-- Helper: Create slider
+local function addSlider(text, min, max, default, suffix, callback)
+    local container = Instance.new("Frame")
+    container.Size = UDim2.new(1, 0, 0, 45)
+    container.BackgroundColor3 = Color3.fromRGB(30, 30, 50)
+    container.BackgroundTransparency = 0.3
+    container.ZIndex = 2
+    
+    local conCorner = Instance.new("UICorner")
+    conCorner.CornerRadius = UDim.new(0, 4)
+    conCorner.Parent = container
+    
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -10, 0, 18)
+    label.Position = UDim2.new(0, 8, 0, 2)
+    label.BackgroundTransparency = 1
+    label.Text = text .. ": " .. tostring(default) .. " " .. (suffix or "")
+    label.TextColor3 = Color3.fromRGB(200, 200, 220)
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 11
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.ZIndex = 3
+    label.Parent = container
+    
+    local slider = Instance.new("Frame")
+    slider.Size = UDim2.new(1, -20, 0, 6)
+    slider.Position = UDim2.new(0, 10, 0, 28)
+    slider.BackgroundColor3 = Color3.fromRGB(60, 60, 85)
+    slider.ZIndex = 3
+    slider.Parent = container
+    
+    local sliderCorner = Instance.new("UICorner")
+    sliderCorner.CornerRadius = UDim.new(0, 3)
+    sliderCorner.Parent = slider
+    
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+    fill.BackgroundColor3 = Color3.fromRGB(60, 180, 120)
+    fill.ZIndex = 3
+    fill.Parent = slider
+    
+    local fillCorner = Instance.new("UICorner")
+    fillCorner.CornerRadius = UDim.new(0, 3)
+    fillCorner.Parent = fill
+    
+    local drag = Instance.new("ImageButton")
+    drag.Size = UDim2.new(0, 14, 0, 14)
+    drag.Position = UDim2.new((default - min) / (max - min), -7, 0, -4)
+    drag.BackgroundColor3 = Color3.fromRGB(200, 200, 255)
+    drag.ZIndex = 4
+    drag.Parent = slider
+    
+    local dragCorner = Instance.new("UICorner")
+    dragCorner.CornerRadius = UDim.new(0, 7)
+    dragCorner.Parent = drag
+    
+    local value = default
+    
+    local function updateSlider(input)
+        local pos = input.Position.X - slider.AbsolutePosition.X
+        local pct = math.clamp(pos / slider.AbsoluteSize.X, 0, 1)
+        value = math.floor(min + (max - min) * pct)
+        fill.Size = UDim2.new(pct, 0, 1, 0)
+        drag.Position = UDim2.new(pct, -7, 0, -4)
+        label.Text = text .. ": " .. tostring(value) .. " " .. (suffix or "")
+        if callback then callback(value) end
+    end
+    
+    drag.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or
+           input.UserInputType == Enum.UserInputType.Touch then
+            local conn
+            conn = Services.UserInputService.InputChanged:Connect(function(inp)
+                if inp.UserInputType == Enum.UserInputType.MouseMovement or
+                   inp.UserInputType == Enum.UserInputType.Touch then
+                    updateSlider(inp)
+                end
+            end)
+            Services.UserInputService.InputEnded:Wait()
+            if conn then conn:Disconnect() end
+        end
+    end)
+    
+    container.Parent = content
+    return { 
+        set = function(v) 
+            value = v
+            local pct = (v - min) / (max - min)
+            fill.Size = UDim2.new(pct, 0, 1, 0)
+            drag.Position = UDim2.new(pct, -7, 0, -4)
+            label.Text = text .. ": " .. tostring(v) .. " " .. (suffix or "")
+        end
+    }
+end
+
+-- ============================================
+-- TAB SYSTEM
+-- ============================================
+
+local tabContainer = Instance.new("Frame")
+tabContainer.Size = UDim2.new(1, 0, 0, 30)
+tabContainer.BackgroundColor3 = Color3.fromRGB(25, 25, 40)
+tabContainer.BackgroundTransparency = 0.3
+tabContainer.ZIndex = 2
+tabContainer.Parent = content
+
+local tabLayout = Instance.new("UIListLayout")
+tabLayout.FillDirection = Enum.FillDirection.Horizontal
+tabLayout.Padding = UDim.new(0, 2)
+tabLayout.Parent = tabContainer
+
+local tabPadding = Instance.new("UIPadding")
+tabPadding.PaddingLeft = UDim.new(0, 2)
+tabPadding.PaddingTop = UDim.new(0, 3)
+tabPadding.Parent = tabContainer
+
+local pageContents = {}
+local activeTab = nil
+local tabs = {"Auto Parry", "Abilities", "Upgrades", "Farming", "Skins", "Misc"}
+
+local function switchTab(name)
+    if activeTab == name then return end
+    activeTab = name
+    for _, page in pairs(pageContents) do
+        page.Visible = false
+    end
+    if pageContents[name] then
+        pageContents[name].Visible = true
+    end
+    for _, child in ipairs(tabContainer:GetChildren()) do
+        if child:IsA("TextButton") then
+            if child.Name == name then
+                child.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+            else
+                child.BackgroundColor3 = Color3.fromRGB(45, 45, 70)
+            end
+        end
+    end
+end
+
+for _, tabName in ipairs(tabs) do
+    local tabBtn = Instance.new("TextButton")
+    tabBtn.Name = tabName
+    tabBtn.Size = UDim2.new(0, 62, 0, 24)
+    tabBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 70)
+    tabBtn.Text = tabName:sub(1, 4)
+    tabBtn.TextColor3 = Color3.fromRGB(200, 200, 220)
+    tabBtn.Font = Enum.Font.GothamBold
+    tabBtn.TextSize = 10
+    tabBtn.AutoButtonColor = false
+    tabBtn.ZIndex = 3
+    
+    local tabCorner = Instance.new("UICorner")
+    tabCorner.CornerRadius = UDim.new(0, 4)
+    tabCorner.Parent = tabBtn
+    
+    tabBtn.MouseButton1Click:Connect(function() switchTab(tabName) end)
+    tabBtn.Parent = tabContainer
+    
+    local page = Instance.new("Frame")
+    page.Name = tabName .. "Page"
+    page.Size = UDim2.new(1, 0, 1, -40)
+    page.Position = UDim2.new(0, 0, 0, 35)
+    page.BackgroundTransparency = 1
+    page.Visible = false
+    page.ZIndex = 2
+    page.Parent = content
+    
+    local pageList = Instance.new("UIListLayout")
+    pageList.Padding = UDim.new(0, 4)
+    pageList.Parent = page
+    
+    local pagePad = Instance.new("UIPadding")
+    pagePad.PaddingLeft = UDim.new(0, 3)
+    pagePad.PaddingRight = UDim.new(0, 3)
+    pagePad.Parent = page
+    
+    pageContents[tabName] = page
+end
+
+-- Default to first tab
+switchTab("Auto Parry")
+
+-- ============================================
+-- TAB 1: AUTO PARRY
+-- ============================================
+local pageAP = pageContents["Auto Parry"]
+
+addSection("Auto Parry Settings").Parent = pageAP
+
+local apToggle = addToggle("Auto Parry", false, function(v)
+    if v then AutoParryEngine.start() else AutoParryEngine.stop() end
+end)
+apToggle.container.Parent = pageAP
+
+local rageToggle = addToggle("Rage Parry (Equip Raging Deflect)", false, function(v)
+    State.UseRage = v
+end)
+rageToggle.container.Parent = pageAP
+
+local staySpawnToggle = addToggle("Stay at Spawn (Die on Game Start)", false, function(v)
+    State.stayspawnshit = v
+    spawn(function()
+        while State.stayspawnshit do
+            task.wait()
+            State.character.Parent = Services.Workspace.Alive
+            local announcer = State.localPlayer.PlayerGui:FindFirstChild("announcer")
+            if announcer then
+                local textBox = announcer:FindFirstChild("TextBox")
+                if textBox and (textBox.Text == "Starting Game" or textBox.Text == "Starting Team Game") then
+                    State.character.Humanoid.Health = 0
+                    textBox.Text = "e"
+                end
+            end
+        end
+    end)
+end)
+staySpawnToggle.container.Parent = pageAP
+
+local tpSpawnToggle = addToggle("TP to Spawn (AFK)", false, function(v)
+    State.TpSpawn = v
+    spawn(function()
+        while State.TpSpawn do
+            task.wait()
+            State.character.HumanoidRootPart.CFrame = CFrame.new(-229, 123, 203)
+        end
+    end)
+end)
+tpSpawnToggle.container.Parent = pageAP
+
+local fakePlatToggle = addToggle("Fake Platform", false, function(v)
+    State.FakePlatform = v
+    if v then
+        State.character.Humanoid.HipHeight = 50
+    else
+        State.character.Humanoid.HipHeight = 0
+    end
+    spawn(function()
+        while State.FakePlatform do
+            task.wait()
+            State.character.Humanoid.HipHeight = 50
+        end
+    end)
+end)
+fakePlatToggle.container.Parent = pageAP
+
+addSection("Anti AFK").Parent = pageAP
+
+local antiAfkToggle = addToggle("Anti AFK", false, function(v)
+    State.AntiAfkLol = v
+    spawn(function()
+        while State.AntiAfkLol do
+            task.wait()
+            State.localPlayer.Idled:connect(function()
+                Services.VirtualUser:Button2Down(Vector2.new(0,0), Services.Workspace.CurrentCamera.CFrame)
+                task.wait(1)
+                Services.VirtualUser:Button2Up(Vector2.new(0,0), Services.Workspace.CurrentCamera.CFrame)
+            end)
+        end
+    end)
+end)
+antiAfkToggle.container.Parent = pageAP
+
+addSection("Distance Config").Parent = pageAP
+
+local distSlider = addSlider("Parry Distance", 0, 100, 20, "studs", function(v)
+    State.sliderValue = v
+end)
+distSlider.container.Parent = pageAP
+
+-- ============================================
+-- TAB 2: ABILITIES
+-- ============================================
+local pageAbilities = pageContents["Abilities"]
+
+addSection("Switch Abilities").Parent = pageAbilities
+
+for _, abilityName in ipairs(ABILITIES) do
+    addButton(abilityName, function()
+        AbilitySwitcher.switchTo(abilityName)
+    end).Parent = pageAbilities
+end
+
+-- ============================================
+-- TAB 3: UPGRADES
+-- ============================================
+local pageUpgrades = pageContents["Upgrades"]
+
+addSection("Set Upgrades").Parent = pageUpgrades
+
+addButton("All Upgrades MAX (Positive)", function()
+    UpgradesModifier.setAllPositive()
+end).Parent = pageUpgrades
+
+addButton("All Upgrades MIN (Negative)", function()
+    UpgradesModifier.setAllNegative()
+end).Parent = pageUpgrades
+
+addSection("Individual Upgrades").Parent = pageUpgrades
+
+for _, name in ipairs(UPGRADE_NAMES) do
+    addButton(name .. " [MAX]", function()
+        UpgradesModifier.setValue(name, 999999999999999999)
+    end).Parent = pageUpgrades
+    
+   
