@@ -1,0 +1,308 @@
+local Ui = loadstring(game:HttpGet("https://raw.githubusercontent.com/feelsgoodd/main/main/ui"))()
+
+local runService = game:GetService("RunService")
+local workspace = game:GetService("Workspace")
+local players = game:GetService("Players")
+local localPlayer = players.LocalPlayer
+local character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
+local abilitiesFolder = character:WaitForChild("Abilities")
+local UserInputService = game:GetService("UserInputService")
+local replicatedStorage = game:GetService("ReplicatedStorage")
+local heartbeatConnection
+local upgrades = localPlayer.Upgrades
+local UseRage = false
+local sliderValue = 20
+
+local function onCharacterAdded(newCharacter)
+    character = newCharacter
+    abilitiesFolder = character:WaitForChild("Abilities")
+end
+
+localPlayer.CharacterAdded:Connect(onCharacterAdded)
+
+local TruValue = Instance.new("StringValue")
+
+if workspace:FindFirstChild("AbilityThingyk1212") then
+    workspace:FindFirstChild("AbilityThingyk1212"):Destroy()
+end
+
+TruValue.Parent = workspace
+TruValue.Name = "AbilityThingyk1212"
+TruValue.Value = "Dash"
+
+local Window = Rayfield:CreateWindow({
+   Name = "Miu.wtf",
+   LoadingTitle = "Miu.wtf",
+   LoadingSubtitle = "by Miu",
+   
+   ConfigurationSaving = {
+      Enabled = true,
+      FolderName = "Miuwtf",
+      FileName = "Configuration"
+   },
+
+   Discord = {
+      Enabled = false,
+      Invite = "",
+      RememberJoins = false
+   },
+
+   KeySystem = false
+})
+
+local AutoParry = Window:CreateTab("Auto Parry", 13014537525)
+local Main = Window:CreateTab("Main", 13014546637)
+local Misc = Window:CreateTab("Misc", 13014546637)
+local AutoOpen = Window:CreateTab("Auto Open", 13014546637)
+local Misc2 = Window:CreateTab("Misc2", 13014546637)
+local Skins = Window:CreateTab("Skins", 13014546637)
+
+Rayfield:Notify({
+   Title = "Miu.wtf Loaded",
+   Content = "Welcome to Miu.wtf",
+   Duration = 6,
+   Image = 4483362458,
+})
+
+local function startAutoParry()
+
+    local character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
+    local ballsFolder = workspace:WaitForChild("Balls")
+
+    local parryButtonPress = replicatedStorage.Remotes.ParryButtonPress
+    local abilityButtonPress = replicatedStorage.Remotes.AbilityButtonPress
+
+    local focusedBall = nil
+
+    local function chooseNewFocusedBall()
+        local balls = ballsFolder:GetChildren()
+
+        for _, ball in ipairs(balls) do
+            if ball:GetAttribute("realBall") == true then
+                focusedBall = ball
+                break
+            elseif ball:GetAttribute("target") ~= nil then
+                focusedBall = ball
+                break
+            end
+        end
+
+        return focusedBall
+    end
+
+    chooseNewFocusedBall()
+
+    local BASE_THRESHOLD = 0.15
+    local VELOCITY_SCALING_FACTOR_FAST = 0.050
+    local VELOCITY_SCALING_FACTOR_SLOW = 0.1
+
+    local function getDynamicThreshold(ballVelocityMagnitude)
+        if ballVelocityMagnitude > 60 then
+            return math.max(0.20, BASE_THRESHOLD - (ballVelocityMagnitude * VELOCITY_SCALING_FACTOR_FAST))
+        else
+            return math.min(0.01, BASE_THRESHOLD + (ballVelocityMagnitude * VELOCITY_SCALING_FACTOR_SLOW))
+        end
+    end
+
+    local function timeUntilImpact(ballVelocity, distanceToPlayer, playerVelocity)
+        local directionToPlayer = (character.HumanoidRootPart.Position - focusedBall.Position).Unit
+
+        local velocityTowardsPlayer =
+            ballVelocity:Dot(directionToPlayer) -
+            playerVelocity:Dot(directionToPlayer)
+
+        if velocityTowardsPlayer <= 0 then
+            return math.huge
+        end
+
+        return (distanceToPlayer - sliderValue) / velocityTowardsPlayer
+    end
+
+    local function checkBallDistance()
+
+        if not character or not character:FindFirstChild("Highlight") then
+            return
+        end
+
+        local charPos = character.PrimaryPart.Position
+        local charVel = character.PrimaryPart.Velocity
+
+        if focusedBall and not focusedBall.Parent then
+            chooseNewFocusedBall()
+        end
+
+        if not focusedBall then
+            chooseNewFocusedBall()
+        end
+
+        local ball = focusedBall
+
+        local distanceToPlayer =
+            (ball.Position - charPos).Magnitude
+
+        local ballVelocityTowardsPlayer =
+            ball.Velocity:Dot((charPos - ball.Position).Unit)
+
+        if distanceToPlayer < 10 then
+            parryButtonPress:Fire()
+        end
+
+        if timeUntilImpact(
+            ball.Velocity,
+            distanceToPlayer,
+            charVel
+        ) < getDynamicThreshold(ballVelocityTowardsPlayer) then
+
+            if character.Abilities["Raging Deflection"].Enabled and UseRage then
+                abilityButtonPress:Fire()
+                parryButtonPress:Fire()
+            else
+                parryButtonPress:Fire()
+            end
+        end
+    end
+
+    heartbeatConnection =
+        runService.Heartbeat:Connect(function()
+            checkBallDistance()
+        end)
+end
+
+local function stopAutoParry()
+    if heartbeatConnection then
+        heartbeatConnection:Disconnect()
+        heartbeatConnection = nil
+    end
+end
+
+AutoParry:CreateToggle({
+    Name = "Auto Parry",
+    CurrentValue = false,
+    Flag = "AutoParryFlag",
+
+    Callback = function(Value)
+        if Value then
+            startAutoParry()
+        else
+            stopAutoParry()
+        end
+    end,
+})
+
+AutoParry:CreateToggle({
+    Name = "Auto Rage",
+    CurrentValue = false,
+    Flag = "AutoRage",
+
+    Callback = function(Value)
+        UseRage = Value
+    end,
+})
+
+AutoParry:CreateSlider({
+   Name = "Distance",
+   Range = {0, 100},
+   Increment = 1,
+   Suffix = "Studs",
+   CurrentValue = 20,
+   Flag = "DistanceSlider",
+
+   Callback = function(Value)
+       sliderValue = Value
+   end,
+})
+
+Main:CreateButton({
+   Name = "Equip Dash",
+
+   Callback = function()
+
+        local args = {
+            [1] = "Dash"
+        }
+
+        replicatedStorage.Remotes.Store.RequestEquipAbility:InvokeServer(unpack(args))
+
+        Rayfield:Notify({
+            Title = "Miu.wtf",
+            Content = "Dash Equipped",
+            Duration = 3,
+            Image = 4483362458,
+        })
+   end,
+})
+
+Main:CreateButton({
+   Name = "Equip Raging Deflection",
+
+   Callback = function()
+
+        local args = {
+            [1] = "Raging Deflection"
+        }
+
+        replicatedStorage.Remotes.Store.RequestEquipAbility:InvokeServer(unpack(args))
+
+        Rayfield:Notify({
+            Title = "Miu.wtf",
+            Content = "Raging Deflection Equipped",
+            Duration = 3,
+            Image = 4483362458,
+        })
+   end,
+})
+
+Misc:CreateButton({
+   Name = "Infinite Dash",
+
+   Callback = function()
+        upgrades:WaitForChild("Dash").Value = 999999999
+   end,
+})
+
+Misc:CreateButton({
+   Name = "Infinite Super Jump",
+
+   Callback = function()
+        upgrades:WaitForChild("Super Jump").Value = 999999999
+   end,
+})
+
+Misc2:CreateButton({
+   Name = "Break Ball",
+
+   Callback = function()
+        replicatedStorage.Remotes.Telekinesis:FireServer()
+   end,
+})
+
+AutoOpen:CreateButton({
+   Name = "Open Weapon Crate",
+
+   Callback = function()
+
+        local _, sword =
+            replicatedStorage.Remotes.Store.RequestOpenSwordBox:InvokeServer()
+
+        game.StarterGui:SetCore("SendNotification", {
+            Title = "Miu.wtf",
+            Text = sword,
+            Duration = 3
+        })
+   end,
+})
+
+Skins:CreateButton({
+   Name = "Empyrean Greatblade Skin",
+
+   Callback = function()
+
+        Rayfield:Notify({
+            Title = "Miu.wtf",
+            Content = "Skin Applied",
+            Duration = 4,
+            Image = 4483362458,
+        })
+
+   end,
+})
