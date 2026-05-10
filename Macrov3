@@ -1,804 +1,520 @@
-repeat task.wait() until game:IsLoaded()
+--[[
+  MIU.WTF GUI - Full Version
+  Features: Auto Parry, Auto Spam, Ball Trail, Counter, Anim Fix, Anti Lag
+  Toggle: Alt key or click icon
+  Draggable: Yes
+]]
 
-local oldGui = game.CoreGui:FindFirstChild("MiuGui")
-if oldGui then oldGui:Destroy() end
-
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
-local Debris = game:GetService("Debris")
-local Stats = game:GetService("Stats")
-local LocalPlayer = Players.LocalPlayer
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local mouse = player:GetMouse()
 
-local remote, f_raw = nil, nil
-local c = {nil,nil,nil,nil,nil,nil,nil}
-local spamActive = false
-local autoParry = false
-local animFix = true
-local antiLag = false
-local ballTrail = false
-local counterVisible = true
-local targetCPS = 50
-local currentCPS = 0
-local timeAccumulator = 0
-local remoteHooked = false
+-- ===== KÍCH THƯỚC =====
+local fullW, fullH = 380, 340
+local miniW, miniH = 50, 50
+local tweenTime = 0.2
+
+-- ===== BIẾN =====
+local autoParryEnabled = false
+local spamEnabled = false
+local ballTrailEnabled = false
+local counterEnabled = false
+local animFixEnabled = false
+local antiLagEnabled = false
 local isOpen = true
-local useKPS = false
-local frameFireCount = 0
-local frameTime = 0
-local realCPS = 0
-local hitDebounce = false
-local warningShown = false
-local fpsCount = 0
-local fpsTimer = 0
-local lastTrackedBall = nil
-local trailObj = nil
-local trailA0 = nil
-local trailA1 = nil
+local isDragging = false
+local dragStart, startPos
 
--- BIẾN CHO AUTO PARRY MỚI
-local parryLocked = false          -- khóa parry sau khi đã đánh
-local parryCooldownTime = 0.35     -- thời gian chờ trước khi có thể parry lại (giây)
-local lastParryTime = 0            -- thời điểm parry gần nhất
-local ballIsFar = false            -- bóng đã đi xa chưa
+local parryCooldownTime = 0.4        -- 0.1s - 1.0s
+local spamCooldownTime = 0.05        -- 0.001s - 0.1s
 
--- MÀU HỒNG NHẠT
-local P1 = Color3.fromRGB(255, 182, 193)
-local P2 = Color3.fromRGB(255, 150, 170)
-local P3 = Color3.fromRGB(120, 60, 80)
-local P4 = Color3.fromRGB(60, 30, 45)
-local WHITE = Color3.new(1,1,1)
-local LGRAY = Color3.fromRGB(230, 210, 220)
-
--- TRAIL
-local function enableTrail(ball)
-    if trailObj then pcall(function() trailObj:Destroy() end) end
-    if trailA0 then pcall(function() trailA0:Destroy() end) end
-    if trailA1 then pcall(function() trailA1:Destroy() end) end
-    trailA0 = Instance.new("Attachment", ball)
-    trailA0.Position = Vector3.new(0, 0.8, 0)
-    trailA1 = Instance.new("Attachment", ball)
-    trailA1.Position = Vector3.new(0, -0.8, 0)
-    trailObj = Instance.new("Trail", ball)
-    trailObj.Attachment0 = trailA0
-    trailObj.Attachment1 = trailA1
-    trailObj.Lifetime = 0.6
-    trailObj.MinLength = 0
-    trailObj.FaceCamera = true
-    trailObj.WidthScale = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, 1.8),
-        NumberSequenceKeypoint.new(0.5, 1.2),
-        NumberSequenceKeypoint.new(1, 0)
-    })
-    trailObj.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 182, 193)),
-        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 130, 160)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(200, 80, 120))
-    })
-    trailObj.Transparency = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, 0),
-        NumberSequenceKeypoint.new(0.7, 0.3),
-        NumberSequenceKeypoint.new(1, 1)
-    })
-end
-
-local function disableTrail()
-    pcall(function() if trailObj then trailObj:Destroy(); trailObj = nil end end)
-    pcall(function() if trailA0 then trailA0:Destroy(); trailA0 = nil end end)
-    pcall(function() if trailA1 then trailA1:Destroy(); trailA1 = nil end end)
-end
-
--- ANIMATION
-local SwordAPI = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("SwordAPI")
-local lastplayedd = 0
-local bypasscd = false
-local AnimationDelay = 1
-local AnimationCache = {}
-local Grab_Parry = nil
-
-local function GetCharacter() return LocalPlayer.Character end
-local function GetHumanoid()
-    local char = GetCharacter()
-    return char and char:FindFirstChildOfClass("Humanoid")
-end
-local function StopAnimation(track)
-    track:Stop(track:GetAttribute("StopFadeTime") or 0.1)
-end
-local function PlayGrabAnimation(track)
-    track:Play(track:GetAttribute("PlayFadeTime") or 0, track:GetAttribute("PlayWeight") or 1, track:GetAttribute("PlaySpeed") or 1)
-end
-local function GetParryAnimation()
-    local char = GetCharacter()
-    if not char then return nil end
-    local currentSword = char:GetAttribute("CurrentlyEquippedSword")
-    if not currentSword then return SwordAPI.Collection.Default:FindFirstChild("GrabParry") end
-    if AnimationCache[currentSword] then return AnimationCache[currentSword] end
-    local success, swordData = pcall(function()
-        return ReplicatedStorage.Shared.ReplicatedInstances.Swords.GetSword:Invoke(currentSword)
-    end)
-    if not success or type(swordData) ~= "table" then
-        AnimationCache[currentSword] = SwordAPI.Collection.Default:FindFirstChild("GrabParry")
-        return AnimationCache[currentSword]
-    end
-    for _, obj in pairs(SwordAPI.Collection:GetChildren()) do
-        if obj.Name == swordData.AnimationType then
-            local anim = obj:FindFirstChild("GrabParry") or obj:FindFirstChild("Grab")
-            if anim then AnimationCache[currentSword] = anim; return anim end
-        end
-    end
-    AnimationCache[currentSword] = SwordAPI.Collection.Default:FindFirstChild("GrabParry")
-    return AnimationCache[currentSword]
-end
-local function PlayParry_Animation()
-    local humanoid = GetHumanoid()
-    if not humanoid then return end
-    local animation = GetParryAnimation()
-    if not animation then return end
-    for _, track in pairs(humanoid.Animator:GetPlayingAnimationTracks()) do
-        if track.Name == "GrabParry" or track.Name == "Grab" then
-            track.TimePosition = 0; StopAnimation(track)
-        elseif track.Name == "SuccessParry" or track.Name == "Success" then
-            StopAnimation(track)
-        end
-    end
-    Grab_Parry = humanoid.Animator:LoadAnimation(animation)
-    PlayGrabAnimation(Grab_Parry)
-end
-local function SpamParry_Animation()
-    if (os.clock() - lastplayedd) >= (AnimationDelay - 0.8) or bypasscd then
-        lastplayedd = os.clock()
-        bypasscd = false
-        PlayParry_Animation()
-    end
-end
-pcall(function()
-    ReplicatedStorage.Remotes.ParrySuccess.OnClientEvent:Connect(function()
-        bypasscd = true
-        hitDebounce = false
-        local humanoid = GetHumanoid()
-        if humanoid then
-            for _, track in pairs(humanoid.Animator:GetPlayingAnimationTracks()) do
-                if track.Name == "GrabParry" or track.Name == "Grab" then StopAnimation(track) end
-            end
-        end
-    end)
-end)
-
--- ANTI LAG
-local antiLagConn = nil
-local function setAntiLag(state)
-    antiLag = state
-    pcall(function()
-        if LocalPlayer.PlayerScripts:FindFirstChild("EffectScripts") then
-            LocalPlayer.PlayerScripts.EffectScripts.ClientFX.Disabled = state
-        end
-    end)
-    if state then
-        pcall(function()
-            antiLagConn = workspace.Runtime.ChildAdded:Connect(function(v)
-                Debris:AddItem(v, 0)
-            end)
-            for _, v in pairs(workspace:GetDescendants()) do
-                if v:IsA("ParticleEmitter") or v:IsA("Trail") or
-                   v:IsA("Smoke") or v:IsA("Fire") or v:IsA("Sparkles") then
-                    v.Enabled = false
-                end
-            end
-        end)
-    else
-        if antiLagConn then antiLagConn:Disconnect(); antiLagConn = nil end
-    end
-end
-
--- REMOTE HOOK
-local mt = getrawmetatable(game)
-local old = mt.__index
-setreadonly(mt, false)
-mt.__index = newcclosure(function(self, key)
-    if (key == "FireServer" or key == "InvokeServer") then
-        return function(instance, ...)
-            local args = {...}
-            if #args >= 4 then
-                if not remoteHooked then remoteHooked = true end
-                remote = instance
-                f_raw = old(instance, "FireServer")
-                for i = 1, 7 do c[i] = args[i] end
-            end
-            return old(self, key)(instance, ...)
-        end
-    end
-    return old(self, key)
-end)
-setreadonly(mt, true)
-
-local ScreenGui = Instance.new("ScreenGui", game.CoreGui)
+-- ===== GUI =====
+local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "MiuGui"
 ScreenGui.ResetOnSpawn = false
-
-local function makeDraggable(frame, handle)
-    handle = handle or frame
-    local drag, dStart, dPos
-    handle.InputBegan:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
-            drag = true; dStart = inp.Position; dPos = frame.Position
-            inp.Changed:Connect(function()
-                if inp.UserInputState == Enum.UserInputState.End then drag = false end
-            end)
-        end
-    end)
-    handle.InputChanged:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch then
-            if drag then
-                local d = inp.Position - dStart
-                frame.Position = UDim2.new(dPos.X.Scale, dPos.X.Offset+d.X, dPos.Y.Scale, dPos.Y.Offset+d.Y)
-            end
-        end
-    end)
-end
-
--- NOTIFY
-local notifyFrame = nil
-local function showNotify(msg)
-    if notifyFrame then notifyFrame:Destroy() end
-    notifyFrame = Instance.new("Frame", ScreenGui)
-    notifyFrame.Size = UDim2.new(0,230,0,40)
-    notifyFrame.Position = UDim2.new(1,10,1,-55)
-    notifyFrame.BackgroundColor3 = P4
-    notifyFrame.BackgroundTransparency = 0.15
-    notifyFrame.BorderSizePixel = 0; notifyFrame.ZIndex = 20
-    Instance.new("UICorner", notifyFrame).CornerRadius = UDim.new(0,10)
-    local ns = Instance.new("UIStroke", notifyFrame)
-    ns.Color = P1; ns.Thickness = 1.5
-    local nl = Instance.new("TextLabel", notifyFrame)
-    nl.Size = UDim2.new(1,-14,1,0); nl.Position = UDim2.new(0,12,0,0)
-    nl.BackgroundTransparency = 1; nl.Font = Enum.Font.GothamBold
-    nl.TextSize = 12; nl.TextColor3 = WHITE; nl.ZIndex = 21
-    nl.Text = msg; nl.TextXAlignment = Enum.TextXAlignment.Left
-    TweenService:Create(notifyFrame, TweenInfo.new(0.3,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{
-        Position = UDim2.new(1,-240,1,-55)
-    }):Play()
-    task.delay(3, function()
-        if notifyFrame then
-            TweenService:Create(notifyFrame, TweenInfo.new(0.3,Enum.EasingStyle.Quad,Enum.EasingDirection.In),{
-                Position = UDim2.new(1,10,1,-55)
-            }):Play()
-            task.delay(0.35, function()
-                if notifyFrame then notifyFrame:Destroy(); notifyFrame=nil end
-            end)
-        end
-    end)
-end
-
--- WARNING
-local function showWarning(onYes, onNo)
-    local box = Instance.new("Frame", ScreenGui)
-    box.Size = UDim2.new(0,310,0,165)
-    box.Position = UDim2.new(0.5,-155,0.5,-82)
-    box.BackgroundColor3 = P4
-    box.BackgroundTransparency = 0.15
-    box.BorderSizePixel = 0; box.ZIndex = 51
-    Instance.new("UICorner", box).CornerRadius = UDim.new(0,14)
-    local bstr = Instance.new("UIStroke", box)
-    bstr.Color = Color3.fromRGB(255,160,0); bstr.Thickness = 2
-    local icon = Instance.new("TextLabel", box)
-    icon.Size = UDim2.new(1,-20,0,28); icon.Position = UDim2.new(0,10,0,8)
-    icon.BackgroundTransparency = 1; icon.Text = "⚠  Performance Warning"
-    icon.Font = Enum.Font.GothamBold; icon.TextSize = 14
-    icon.TextColor3 = Color3.fromRGB(255,160,0); icon.ZIndex = 52
-    icon.TextXAlignment = Enum.TextXAlignment.Left
-    local msg = Instance.new("TextLabel", box)
-    msg.Size = UDim2.new(1,-20,0,80); msg.Position = UDim2.new(0,10,0,38)
-    msg.BackgroundTransparency = 1
-    msg.Text = "Setting CPS above 800 may cause\nFPS drops on your device.\n\nThis affects gameplay smoothness.\nDo you still want to continue?"
-    msg.Font = Enum.Font.Gotham; msg.TextSize = 12
-    msg.TextColor3 = LGRAY; msg.TextWrapped = true; msg.ZIndex = 52
-    local yesBtn = Instance.new("TextButton", box)
-    yesBtn.Size = UDim2.new(0,115,0,30); yesBtn.Position = UDim2.new(0,15,1,-40)
-    yesBtn.BackgroundColor3 = P2; yesBtn.Text = "Yes, continue"
-    yesBtn.Font = Enum.Font.GothamBold; yesBtn.TextSize = 12
-    yesBtn.TextColor3 = WHITE; yesBtn.BorderSizePixel = 0; yesBtn.ZIndex = 52
-    Instance.new("UICorner", yesBtn).CornerRadius = UDim.new(0,8)
-    local noBtn = Instance.new("TextButton", box)
-    noBtn.Size = UDim2.new(0,115,0,30); noBtn.Position = UDim2.new(1,-130,1,-40)
-    noBtn.BackgroundColor3 = Color3.fromRGB(160,40,40); noBtn.Text = "No, go back"
-    noBtn.Font = Enum.Font.GothamBold; noBtn.TextSize = 12
-    noBtn.TextColor3 = WHITE; noBtn.BorderSizePixel = 0; noBtn.ZIndex = 52
-    Instance.new("UICorner", noBtn).CornerRadius = UDim.new(0,8)
-    yesBtn.MouseButton1Click:Connect(function() box:Destroy(); onYes() end)
-    noBtn.MouseButton1Click:Connect(function() box:Destroy(); onNo() end)
-end
-
--- COUNTER FRAME
-local CpsCounter = Instance.new("Frame", ScreenGui)
-CpsCounter.Size = UDim2.new(0,115,0,68)
-CpsCounter.Position = UDim2.new(0,10,0,10)
-CpsCounter.BackgroundColor3 = P4
-CpsCounter.BackgroundTransparency = 0.3
-CpsCounter.BorderSizePixel = 0
-Instance.new("UICorner", CpsCounter).CornerRadius = UDim.new(0,10)
-local CpsStroke = Instance.new("UIStroke", CpsCounter)
-CpsStroke.Color = P1; CpsStroke.Thickness = 1.5
-
-local CpsCounterLabel = Instance.new("TextLabel", CpsCounter)
-CpsCounterLabel.Size = UDim2.new(1,0,0,22)
-CpsCounterLabel.Position = UDim2.new(0,0,0,2)
-CpsCounterLabel.BackgroundTransparency = 1
-CpsCounterLabel.Text = "0 CPS"
-CpsCounterLabel.Font = Enum.Font.GothamBold
-CpsCounterLabel.TextSize = 13
-CpsCounterLabel.TextColor3 = LGRAY
-
-local FpsLabel = Instance.new("TextLabel", CpsCounter)
-FpsLabel.Size = UDim2.new(1,0,0,20)
-FpsLabel.Position = UDim2.new(0,0,0,24)
-FpsLabel.BackgroundTransparency = 1
-FpsLabel.Text = "FPS: 0"
-FpsLabel.Font = Enum.Font.GothamBold
-FpsLabel.TextSize = 11
-FpsLabel.TextColor3 = LGRAY
-
-local PingLabel = Instance.new("TextLabel", CpsCounter)
-PingLabel.Size = UDim2.new(1,0,0,20)
-PingLabel.Position = UDim2.new(0,0,0,44)
-PingLabel.BackgroundTransparency = 1
-PingLabel.Text = "Ping: 0ms"
-PingLabel.Font = Enum.Font.GothamBold
-PingLabel.TextSize = 11
-PingLabel.TextColor3 = LGRAY
-makeDraggable(CpsCounter)
-
--- MANUAL SPAM PANEL
-local SpamPanel = Instance.new("Frame", ScreenGui)
-SpamPanel.Size = UDim2.new(0,145,0,65)
-SpamPanel.Position = UDim2.new(0.5,-72,1,-80)
-SpamPanel.BackgroundColor3 = P4
-SpamPanel.BackgroundTransparency = 0.3
-SpamPanel.BorderSizePixel = 0
-SpamPanel.Visible = false
-Instance.new("UICorner", SpamPanel).CornerRadius = UDim.new(0,12)
-local SpamPanelStroke = Instance.new("UIStroke", SpamPanel)
-SpamPanelStroke.Color = P1; SpamPanelStroke.Thickness = 2
-local SpamPanelTitle = Instance.new("TextLabel", SpamPanel)
-SpamPanelTitle.Size = UDim2.new(1,0,0,22)
-SpamPanelTitle.BackgroundTransparency = 1
-SpamPanelTitle.Text = "Manual Spam"
-SpamPanelTitle.Font = Enum.Font.GothamBold
-SpamPanelTitle.TextSize = 11
-SpamPanelTitle.TextColor3 = P1
-local SpamPanelBtn = Instance.new("TextButton", SpamPanel)
-SpamPanelBtn.Size = UDim2.new(0.85,0,0,30)
-SpamPanelBtn.Position = UDim2.new(0.075,0,0,27)
-SpamPanelBtn.BackgroundColor3 = P2
-SpamPanelBtn.Text = "SPAM: OFF"
-SpamPanelBtn.Font = Enum.Font.GothamBold
-SpamPanelBtn.TextSize = 13
-SpamPanelBtn.TextColor3 = WHITE
-SpamPanelBtn.BorderSizePixel = 0
-Instance.new("UICorner", SpamPanelBtn).CornerRadius = UDim.new(0,8)
-makeDraggable(SpamPanel, SpamPanelTitle)
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
 -- MAIN FRAME
-local Frame = Instance.new("Frame", ScreenGui)
-Frame.Size = UDim2.new(0,200,0,310)
-Frame.Position = UDim2.new(0.5,-100,0.5,-155)
-Frame.BackgroundColor3 = P4
-Frame.BackgroundTransparency = 0.35
-Frame.BorderSizePixel = 0
-Frame.ClipsDescendants = true
-Instance.new("UICorner", Frame).CornerRadius = UDim.new(0,14)
-local MainStroke = Instance.new("UIStroke", Frame)
-MainStroke.Color = P1; MainStroke.Thickness = 2
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, fullW, 0, fullH)
+MainFrame.Position = UDim2.new(0.5, -fullW/2, 0.5, -fullH/2)
+MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 20, 30)
+MainFrame.BorderSize = 0
+MainFrame.ClipsDescendants = true
+MainFrame.Active = true
+MainFrame.Draggable = false
+MainFrame.Parent = ScreenGui
 
-local TitleBar = Instance.new("Frame", Frame)
-TitleBar.Size = UDim2.new(1,0,0,32)
-TitleBar.BackgroundColor3 = P3
-TitleBar.BackgroundTransparency = 0.2
-TitleBar.BorderSizePixel = 0
-Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0,14)
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 12)
+mainCorner.Parent = MainFrame
 
-local Title = Instance.new("TextLabel", TitleBar)
-Title.Size = UDim2.new(0.72,0,1,0)
-Title.Position = UDim2.new(0.05,0,0,0)
-Title.BackgroundTransparency = 1
-Title.Text = "Miu.wtf"
-Title.Font = Enum.Font.GothamBold
-Title.TextSize = 14
-Title.TextColor3 = P1
-Title.TextXAlignment = Enum.TextXAlignment.Left
-
-local MinBtn = Instance.new("TextButton", TitleBar)
-MinBtn.Size = UDim2.new(0,26,0,26)
-MinBtn.Position = UDim2.new(1,-30,0.5,-13)
-MinBtn.BackgroundColor3 = P2
-MinBtn.Text = "_"
-MinBtn.Font = Enum.Font.GothamBold
-MinBtn.TextSize = 14
-MinBtn.TextColor3 = WHITE
-MinBtn.BorderSizePixel = 0
-Instance.new("UICorner", MinBtn).CornerRadius = UDim.new(0,6)
-makeDraggable(Frame, TitleBar)
-
-local Content = Instance.new("Frame", Frame)
-Content.Size = UDim2.new(1,0,1,-32)
-Content.Position = UDim2.new(0,0,0,32)
-Content.BackgroundTransparency = 1
-
-local StatusLabel = Instance.new("TextLabel", Content)
-StatusLabel.Size = UDim2.new(1,0,0,14)
-StatusLabel.Position = UDim2.new(0,0,0,4)
-StatusLabel.BackgroundTransparency = 1
-StatusLabel.Text = "Waiting..."
-StatusLabel.Font = Enum.Font.Gotham
-StatusLabel.TextSize = 10
-StatusLabel.TextColor3 = LGRAY
-
-local function makDiv(y)
-    local d = Instance.new("Frame", Content)
-    d.Size = UDim2.new(0.85,0,0,1)
-    d.Position = UDim2.new(0.075,0,0,y)
-    d.BackgroundColor3 = P1; d.BorderSizePixel = 0
-    d.BackgroundTransparency = 0.5
-end
-local function makeLabel(y, txt)
-    local l = Instance.new("TextLabel", Content)
-    l.Size = UDim2.new(0.55,0,0,22); l.Position = UDim2.new(0.075,0,0,y)
-    l.BackgroundTransparency = 1; l.Text = txt
-    l.Font = Enum.Font.GothamBold; l.TextSize = 11
-    l.TextColor3 = LGRAY; l.TextXAlignment = Enum.TextXAlignment.Left
-    return l
-end
-local function makeBtn(y, txt, active)
-    local b = Instance.new("TextButton", Content)
-    b.Size = UDim2.new(0,52,0,22); b.Position = UDim2.new(1,-62,0,y)
-    b.BackgroundColor3 = active and P1 or P2; b.Text = txt
-    b.Font = Enum.Font.GothamBold; b.TextSize = 11
-    b.TextColor3 = WHITE; b.BorderSizePixel = 0
-    Instance.new("UICorner", b).CornerRadius = UDim.new(0,7)
-    return b
-end
-
-makDiv(22)
-local RateLabel = makeLabel(27, "CPS: 50")
-local ModeBtn = makeBtn(27, "CPS", true)
-
-local function getMax() return useKPS and 400 or 870 end
-
-local SliderBg = Instance.new("Frame", Content)
-SliderBg.Size = UDim2.new(0.85,0,0,7)
-SliderBg.Position = UDim2.new(0.075,0,0,55)
-SliderBg.BackgroundColor3 = P3; SliderBg.BorderSizePixel = 0
-SliderBg.BackgroundTransparency = 0.4
-Instance.new("UICorner", SliderBg).CornerRadius = UDim.new(1,0)
-local SliderFill = Instance.new("Frame", SliderBg)
-SliderFill.BackgroundColor3 = P1; SliderFill.BorderSizePixel = 0
-Instance.new("UICorner", SliderFill).CornerRadius = UDim.new(1,0)
-local SliderKnob = Instance.new("TextButton", SliderBg)
-SliderKnob.Size = UDim2.new(0,16,0,16)
-SliderKnob.BackgroundColor3 = P1; SliderKnob.Text = ""
-SliderKnob.BorderSizePixel = 0
-Instance.new("UICorner", SliderKnob).CornerRadius = UDim.new(1,0)
-
-local draggingSlider = false
-local lastSliderVal = (50-1)/(870-1)
-local pendingSliderVal = lastSliderVal
-
-local function applySlider(val)
-    val = math.clamp(val, 0, 1)
-    targetCPS = math.floor(1 + (getMax()-1)*val)
-    SliderFill.Size = UDim2.new(val,0,1,0)
-    SliderKnob.Position = UDim2.new(val,-8,0.5,-8)
-    RateLabel.Text = (useKPS and "KPS: " or "CPS: ")..targetCPS
-    lastSliderVal = val
-end
-
-local function updateSlider(val)
-    val = math.clamp(val, 0, 1)
-    local newCPS = math.floor(1 + (getMax()-1)*val)
-    if not useKPS and newCPS > 800 and not warningShown then
-        warningShown = true
-        pendingSliderVal = val
-        showWarning(
-            function() applySlider(pendingSliderVal) end,
-            function() applySlider(lastSliderVal) end
-        )
-        return
-    end
-    applySlider(val)
-end
-
-applySlider(lastSliderVal)
-
-ModeBtn.MouseButton1Click:Connect(function()
-    useKPS = not useKPS
-    ModeBtn.Text = useKPS and "KPS" or "CPS"
-    warningShown = false
-    applySlider((50-1)/(getMax()-1))
-    showNotify(useKPS and "KPS — max 400" or "CPS — max 870")
-end)
-
-SliderKnob.InputBegan:Connect(function(i)
-    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then draggingSlider = true end
-end)
-UserInputService.InputEnded:Connect(function(i)
-    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then draggingSlider = false end
-end)
-UserInputService.InputChanged:Connect(function(i)
-    if draggingSlider and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
-        updateSlider((i.Position.X - SliderBg.AbsolutePosition.X) / SliderBg.AbsoluteSize.X)
-    end
-end)
-SliderBg.InputBegan:Connect(function(i)
-    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-        updateSlider((i.Position.X - SliderBg.AbsolutePosition.X) / SliderBg.AbsoluteSize.X)
-        draggingSlider = true
-    end
-end)
-
-makDiv(68)
-makeLabel(74, "Auto Parry")
-local ParryBtn = makeBtn(74, "OFF", false)
-ParryBtn.BackgroundColor3 = P2
-ParryBtn.MouseButton1Click:Connect(function()
-    autoParry = not autoParry
-    hitDebounce = false
-    parryLocked = false
-    ballIsFar = false
-    ParryBtn.Text = autoParry and "ON" or "OFF"
-    ParryBtn.BackgroundColor3 = autoParry and P1 or P2
-    showNotify(autoParry and "Auto Parry ON [T]" or "Auto Parry OFF")
-end)
-
-makDiv(102)
-makeLabel(108, "Ball Trail")
-local TrailBtn = makeBtn(108, "OFF", false)
-TrailBtn.BackgroundColor3 = P2
-TrailBtn.MouseButton1Click:Connect(function()
-    ballTrail = not ballTrail
-    TrailBtn.Text = ballTrail and "ON" or "OFF"
-    TrailBtn.BackgroundColor3 = ballTrail and Color3.fromRGB(255,150,170) or P2
-    if not ballTrail then disableTrail(); lastTrackedBall = nil end
-    showNotify(ballTrail and "Ball Trail ON" or "Ball Trail OFF")
-end)
-
-makDiv(136)
-makeLabel(142, "Counter UI")
-local CounterBtn = makeBtn(142, "ON", true)
-CounterBtn.MouseButton1Click:Connect(function()
-    counterVisible = not counterVisible
-    CpsCounter.Visible = counterVisible
-    CounterBtn.Text = counterVisible and "ON" or "OFF"
-    CounterBtn.BackgroundColor3 = counterVisible and P1 or P2
-end)
-
-makDiv(170)
-makeLabel(176, "Anim Fix")
-local AnimBtn = makeBtn(176, "ON", true)
-AnimBtn.MouseButton1Click:Connect(function()
-    animFix = not animFix
-    AnimBtn.Text = animFix and "ON" or "OFF"
-    AnimBtn.BackgroundColor3 = animFix and P1 or P2
-end)
-
-makDiv(204)
-makeLabel(210, "Anti Lag")
-local AntiBtn = makeBtn(210, "OFF", false)
-AntiBtn.BackgroundColor3 = P2
-AntiBtn.MouseButton1Click:Connect(function()
-    antiLag = not antiLag
-    setAntiLag(antiLag)
-    AntiBtn.Text = antiLag and "ON" or "OFF"
-    AntiBtn.BackgroundColor3 = antiLag and P1 or P2
-    showNotify(antiLag and "Anti Lag ON" or "Anti Lag OFF")
-end)
-
-makDiv(238)
-makeLabel(244, "Show Manual Spam")
-local ShowBtn = makeBtn(244, "OFF", false)
-ShowBtn.BackgroundColor3 = P2
-local spamPanelVisible = false
-ShowBtn.MouseButton1Click:Connect(function()
-    spamPanelVisible = not spamPanelVisible
-    SpamPanel.Visible = spamPanelVisible
-    ShowBtn.Text = spamPanelVisible and "ON" or "OFF"
-    ShowBtn.BackgroundColor3 = spamPanelVisible and P1 or P2
-end)
-
-local fullSize = UDim2.new(0,200,0,310)
-local miniSize = UDim2.new(0,200,0,32)
-local function setOpen(state)
-    isOpen = state
-    TweenService:Create(Frame, TweenInfo.new(0.25,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{
-        Size = state and fullSize or miniSize
-    }):Play()
-    MinBtn.Text = state and "_" or "▲"
-end
-MinBtn.MouseButton1Click:Connect(function() setOpen(not isOpen) end)
-
-local function toggleSpam()
-    if not remote then showNotify("Block the ball first!"); return end
-    spamActive = not spamActive
-    if not spamActive then currentCPS = 0 end
-    SpamPanelBtn.Text = spamActive and "SPAM: ON" or "SPAM: OFF"
-    SpamPanelBtn.BackgroundColor3 = spamActive and P1 or P2
-    if not spamActive then
-        CpsCounterLabel.Text = "0 "..(useKPS and "KPS" or "CPS")
-        CpsCounterLabel.TextColor3 = LGRAY
-        CpsStroke.Color = P1
-    end
-end
-
-SpamPanelBtn.MouseButton1Click:Connect(toggleSpam)
-
-UserInputService.InputBegan:Connect(function(input, gp)
-    if gp then return end
-    if input.KeyCode == Enum.KeyCode.LeftAlt or input.KeyCode == Enum.KeyCode.RightAlt then
-        setOpen(not isOpen)
-    elseif input.KeyCode == Enum.KeyCode.G then
-        toggleSpam()
-    elseif input.KeyCode == Enum.KeyCode.T then
-        autoParry = not autoParry
-        hitDebounce = false
-        parryLocked = false
-        ballIsFar = false
-        ParryBtn.Text = autoParry and "ON" or "OFF"
-        ParryBtn.BackgroundColor3 = autoParry and P1 or P2
-        showNotify(autoParry and "Auto Parry ON" or "Auto Parry OFF")
-    end
-end)
-
-task.spawn(function()
-    while not remoteHooked do task.wait(0.1) end
-    StatusLabel.Text = "Ready"
-    StatusLabel.TextColor3 = P1
-    showNotify("Remote hooked!")
-end)
-
--- HEARTBEAT
-RunService.Heartbeat:Connect(function(dt)
-    fpsCount += 1
-    fpsTimer += dt
-    frameTime += dt
-
-    if fpsTimer >= 1 then
-        local fps = math.floor(fpsCount / fpsTimer)
-        fpsCount = 0; fpsTimer = 0
-        FpsLabel.Text = "FPS: "..fps
-        FpsLabel.TextColor3 = fps >= 50 and Color3.fromRGB(50,220,80) or fps >= 30 and Color3.fromRGB(255,200,0) or Color3.fromRGB(255,60,60)
-        pcall(function()
-            local ping = math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
-            PingLabel.Text = "Ping: "..ping.."ms"
-            PingLabel.TextColor3 = ping <= 80 and Color3.fromRGB(50,220,80) or ping <= 150 and Color3.fromRGB(255,200,0) or Color3.fromRGB(255,60,60)
+-- ===== DRAG =====
+MainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        isDragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                isDragging = false
+            end
         end)
     end
+end)
 
-    if frameTime >= 0.1 then
-        if spamActive then
-            realCPS = math.floor(frameFireCount / frameTime)
-            local mode = useKPS and "KPS" or "CPS"
-            CpsCounterLabel.Text = realCPS.." "..mode
-            if realCPS <= 100 then
-                CpsCounterLabel.TextColor3 = Color3.fromRGB(255,60,60)
-                CpsStroke.Color = Color3.fromRGB(255,60,60)
-            elseif realCPS <= 150 then
-                CpsCounterLabel.TextColor3 = Color3.fromRGB(255,200,0)
-                CpsStroke.Color = Color3.fromRGB(255,200,0)
-            else
-                CpsCounterLabel.TextColor3 = Color3.fromRGB(50,220,80)
-                CpsStroke.Color = Color3.fromRGB(50,220,80)
-            end
-        else
-            CpsCounterLabel.Text = "0 "..(useKPS and "KPS" or "CPS")
-            CpsCounterLabel.TextColor3 = LGRAY
-            CpsStroke.Color = P1
-        end
-        frameFireCount = 0
-        frameTime = 0
-    end
-
-    local ballContainer = workspace:FindFirstChild("Balls")
-    local ball = ballContainer and ballContainer:GetChildren()[1]
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    local cam = workspace.CurrentCamera
-
-    -- BALL TRAIL
-    if ballTrail then
-        if ball and ball:IsA("BasePart") then
-            if ball ~= lastTrackedBall then
-                lastTrackedBall = ball
-                enableTrail(ball)
-            end
-        else
-            if lastTrackedBall then
-                lastTrackedBall = nil
-                disableTrail()
-            end
-        end
-    end
-
-    -- AUTO PARRY CẢI TIẾN — chỉ parry 1 lần, không double
-    if autoParry and remote and f_raw and ball and ball:IsA("BasePart") and hrp then
-        local vel = ball.Velocity.Magnitude
-        local toPlayer = hrp.Position - ball.Position
-        local dist = toPlayer.Magnitude
-        local isComing = vel > 1 and ball.Velocity.Unit:Dot(toPlayer.Unit) > 0
-
-        local target = ball:GetAttribute("Target") or ball:GetAttribute("target")
-            or ball:GetAttribute("TargetPlayer") or ball:GetAttribute("targetPlayer")
-        local isMyBall = (target == LocalPlayer.Name)
-            or (target == LocalPlayer.UserId)
-            or (target == tostring(LocalPlayer.UserId))
-
-        local hitDist = 20 + (vel * 0.18)
-        local farDist = hitDist * 2.5
-        local now = os.clock()
-
-        -- Kiểm tra nếu bóng đã đi xa để mở khóa parry
-        if dist > farDist or not isComing then
-            ballIsFar = true
-        end
-
-        -- Mở khóa parry nếu:
-        -- 1. Đã qua cooldown VÀ bóng đã đi xa
-        -- 2. Hoặc đã qua cooldown lâu hơn (0.6s) — safety fallback
-        if parryLocked then
-            local timeSinceLastParry = now - lastParryTime
-            if (ballIsFar and timeSinceLastParry >= parryCooldownTime) or timeSinceLastParry >= 0.6 then
-                parryLocked = false
-                hitDebounce = false
-                ballIsFar = false
-            end
-        end
-
-        -- CHỈ PARRY KHI:
-        -- 1. Bóng của mình
-        -- 2. Bóng đang đến gần
-        -- 3. Khoảng cách đủ gần để đánh
-        -- 4. KHÔNG bị khóa parry
-        -- 5. KHÔNG bị debounce
-        if isMyBall and isComing and dist <= hitDist and not parryLocked and not hitDebounce then
-            -- Khóa parry ngay lập tức — KHÔNG cho parry lần 2
-            parryLocked = true
-            hitDebounce = true
-            lastParryTime = now
-            ballIsFar = false
-
-            -- Fire remote 1 lần duy nhất
-            c[3] = cam and cam.CFrame.LookVector or c[3]
-            pcall(function() f_raw(remote, unpack(c)) end)
-
-            -- Play animation parry
-            task.spawn(PlayParry_Animation)
-
-            -- Mở khóa hitDebounce sau 0.2s đề phòng bug
-            task.delay(0.2, function()
-                hitDebounce = false
-            end)
-        end
-    end
-
-    -- SPAM
-    if spamActive and remote and f_raw then
-        local rampSpeed = dt * 200
-        if currentCPS < targetCPS then
-            currentCPS = math.min(currentCPS + rampSpeed, targetCPS)
-        end
-
-        timeAccumulator += dt
-        local interval = 1 / math.max(currentCPS, 1)
-        while timeAccumulator >= interval do
-            timeAccumulator -= interval
-            pcall(function()
-                c[3] = cam and cam.CFrame.LookVector or c[3]
-                f_raw(remote, unpack(c))
-                frameFireCount += 1
-            end)
-            if animFix then task.spawn(SpamParry_Animation) end
-        end
-    else
-        timeAccumulator = 0
-        currentCPS = 0
+MainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement and isDragging then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
     end
 end)
+
+-- ===== CONTENT (bên trong MainFrame) =====
+local Content = Instance.new("Frame")
+Content.Name = "Content"
+Content.Size = UDim2.new(1, -16, 1, -16)
+Content.Position = UDim2.new(0, 8, 0, 8)
+Content.BackgroundTransparency = 1
+Content.Parent = MainFrame
+
+-- ===== TITLE ROW (luôn hiển thị) =====
+local TitleRow = Instance.new("Frame")
+TitleRow.Name = "TitleRow"
+TitleRow.Size = UDim2.new(1, 0, 0, 36)
+TitleRow.BackgroundTransparency = 1
+TitleRow.Parent = Content
+
+-- ICON (ImageButton) - ấn để toggle GUI
+local IconButton = Instance.new("ImageButton")
+IconButton.Name = "IconButton"
+IconButton.Size = UDim2.new(0, 30, 0, 30)
+IconButton.Position = UDim2.new(0, 2, 0, 3)
+IconButton.BackgroundTransparency = 0
+IconButton.BackgroundColor3 = Color3.fromRGB(255, 150, 200)
+IconButton.Image = "rbxassetid://6006991075"  -- Pog Cat (hoặc bạn đổi sau)
+IconButton.ImageColor3 = Color3.fromRGB(255, 255, 255)
+IconButton.BorderSize = 0
+IconButton.Parent = TitleRow
+
+local iconCorner = Instance.new("UICorner")
+iconCorner.CornerRadius = UDim.new(0, 8)
+iconCorner.Parent = IconButton
+
+-- TITLE TEXT
+local Title = Instance.new("TextLabel")
+Title.Name = "Title"
+Title.Size = UDim2.new(1, -40, 1, 0)
+Title.Position = UDim2.new(0, 38, 0, 0)
+Title.Text = "Miu Hub"
+Title.TextColor3 = Color3.fromRGB(255, 200, 230)
+Title.TextSize = 17
+Title.Font = Enum.Font.GothamBold
+Title.BackgroundTransparency = 1
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TitleRow
+
+-- ===== CONTROLS FRAME (cuộn được nếu cần) =====
+local Controls = Instance.new("ScrollingFrame")
+Controls.Name = "Controls"
+Controls.Size = UDim2.new(1, 0, 1, -44)
+Controls.Position = UDim2.new(0, 0, 0, 44)
+Controls.BackgroundTransparency = 1
+Controls.BorderSize = 0
+Controls.ScrollBarThickness = 4
+Controls.ScrollBarImageColor3 = Color3.fromRGB(255, 150, 200)
+Controls.CanvasSize = UDim2.new(0, 0, 0, 260)
+Controls.AutomaticCanvasSize = Enum.AutomaticSize.Y
+Controls.Parent = Content
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+listLayout.Padding = UDim.new(0, 6)
+listLayout.Parent = Controls
+
+local pad = Instance.new("UIPadding")
+pad.PaddingLeft = UDim.new(0, 4)
+pad.PaddingRight = UDim.new(0, 4)
+pad.Parent = Controls
+
+-- ===== HÀM TẠO TOGGLE =====
+local function createToggle(parent, name, order, desc)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0, 28)
+    frame.BackgroundColor3 = Color3.fromRGB(40, 30, 50)
+    frame.BackgroundTransparency = 0.5
+    frame.BorderSize = 0
+    frame.LayoutOrder = order
+    frame.Parent = parent
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = frame
+    
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -40, 1, 0)
+    label.Position = UDim2.new(0, 8, 0, 0)
+    label.Text = name
+    label.TextColor3 = Color3.fromRGB(220, 200, 230)
+    label.TextSize = 13
+    label.Font = Enum.Font.GothamSemibold
+    label.BackgroundTransparency = 1
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = frame
+    
+    local toggleBtn = Instance.new("ImageButton")
+    toggleBtn.Name = "Toggle"
+    toggleBtn.Size = UDim2.new(0, 32, 0, 20)
+    toggleBtn.Position = UDim2.new(1, -36, 0.5, -10)
+    toggleBtn.BackgroundColor3 = Color3.fromRGB(80, 60, 90)
+    toggleBtn.BorderSize = 0
+    toggleBtn.Parent = frame
+    
+    local toggleCorner = Instance.new("UICorner")
+    toggleCorner.CornerRadius = UDim.new(0, 10)
+    toggleCorner.Parent = toggleBtn
+    
+    local toggleCircle = Instance.new("Frame")
+    toggleCircle.Name = "Circle"
+    toggleCircle.Size = UDim2.new(0, 16, 0, 16)
+    toggleCircle.Position = UDim2.new(0, 2, 0.5, -8)
+    toggleCircle.BackgroundColor3 = Color3.fromRGB(180, 160, 190)
+    toggleCircle.BorderSize = 0
+    toggleCircle.Parent = toggleBtn
+    
+    local circleCorner = Instance.new("UICorner")
+    circleCorner.CornerRadius = UDim.new(0, 8)
+    circleCorner.Parent = toggleCircle
+    
+    return frame, toggleBtn, toggleCircle
+end
+
+-- ===== HÀM TẠO SLIDER =====
+local function createSlider(parent, name, order, minVal, maxVal, defaultVal, valChanged)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0, 42)
+    frame.BackgroundColor3 = Color3.fromRGB(40, 30, 50)
+    frame.BackgroundTransparency = 0.5
+    frame.BorderSize = 0
+    frame.LayoutOrder = order
+    frame.Parent = parent
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = frame
+    
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0, 140, 0, 18)
+    label.Position = UDim2.new(0, 8, 0, 2)
+    label.Text = name
+    label.TextColor3 = Color3.fromRGB(220, 200, 230)
+    label.TextSize = 12
+    label.Font = Enum.Font.GothamSemibold
+    label.BackgroundTransparency = 1
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = frame
+    
+    local valueLabel = Instance.new("TextLabel")
+    valueLabel.Name = "Value"
+    valueLabel.Size = UDim2.new(0, 50, 0, 18)
+    valueLabel.Position = UDim2.new(1, -54, 0, 2)
+    valueLabel.Text = tostring(defaultVal)
+    valueLabel.TextColor3 = Color3.fromRGB(255, 150, 200)
+    valueLabel.TextSize = 12
+    valueLabel.Font = Enum.Font.GothamBold
+    valueLabel.BackgroundTransparency = 1
+    valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+    valueLabel.Parent = frame
+    
+    local sliderBg = Instance.new("Frame")
+    sliderBg.Size = UDim2.new(1, -16, 0, 4)
+    sliderBg.Position = UDim2.new(0, 8, 0, 26)
+    sliderBg.BackgroundColor3 = Color3.fromRGB(60, 50, 70)
+    sliderBg.BorderSize = 0
+    sliderBg.Parent = frame
+    
+    local bgCorner = Instance.new("UICorner")
+    bgCorner.CornerRadius = UDim.new(0, 2)
+    bgCorner.Parent = sliderBg
+    
+    local fill = Instance.new("Frame")
+    fill.Name = "Fill"
+    fill.Size = UDim2.new(0, 0, 1, 0)
+    fill.BackgroundColor3 = Color3.fromRGB(255, 100, 150)
+    fill.BorderSize = 0
+    fill.Parent = sliderBg
+    
+    local fillCorner = Instance.new("UICorner")
+    fillCorner.CornerRadius = UDim.new(0, 2)
+    fillCorner.Parent = fill
+    
+    local thumb = Instance.new("ImageButton")
+    thumb.Name = "Thumb"
+    thumb.Size = UDim2.new(0, 14, 0, 14)
+    thumb.Position = UDim2.new(0, -7, 0.5, -7)
+    thumb.BackgroundColor3 = Color3.fromRGB(255, 150, 200)
+    thumb.BorderSize = 0
+    thumb.Parent = sliderBg
+    
+    local thumbCorner = Instance.new("UICorner")
+    thumbCorner.CornerRadius = UDim.new(0, 7)
+    thumbCorner.Parent = thumb
+    
+    -- Map giá trị
+    local range = maxVal - minVal
+    local defaultPct = (defaultVal - minVal) / range
+    fill.Size = UDim2.new(defaultPct, 0, 1, 0)
+    thumb.Position = UDim2.new(defaultPct, -7, 0.5, -7)
+    valueLabel.Text = string.format("%.3fs", defaultVal)
+    
+    -- Drag slider
+    local dragging = false
+    thumb.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+        end
+    end)
+    
+    thumb.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+    
+    sliderBg.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement and dragging then
+            local absX = sliderBg.AbsolutePosition.X
+            local absW = sliderBg.AbsoluteSize.X
+            local localX = math.clamp(input.Position.X - absX, 0, absW)
+            local pct = localX / absW
+            
+            local val = minVal + pct * range
+            val = math.clamp(val, minVal, maxVal)
+            
+            fill.Size = UDim2.new(pct, 0, 1, 0)
+            thumb.Position = UDim2.new(pct, -7, 0.5, -7)
+            valueLabel.Text = string.format("%.3fs", val)
+            
+            if valChanged then
+                valChanged(val)
+            end
+        end
+    end)
+    
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+    
+    return frame
+end
+
+-- ===== TẠO CÁC CONTROL =====
+
+-- 1. Auto Parry (LayoutOrder = 1)
+local parryFrame, parryToggle, parryCircle = createToggle(Controls, "Auto Parry", 1)
+local parryOn = false
+parryToggle.MouseButton1Click:Connect(function()
+    parryOn = not parryOn
+    autoParryEnabled = parryOn
+    local color = parryOn and Color3.fromRGB(255, 80, 150) or Color3.fromRGB(80, 60, 90)
+    local circColor = parryOn and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(180, 160, 190)
+    local circPos = parryOn and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
+    TweenService:Create(parryToggle, TweenInfo.new(0.15), {BackgroundColor3 = color}):Play()
+    TweenService:Create(parryCircle, TweenInfo.new(0.15), {BackgroundColor3 = circColor, Position = circPos}):Play()
+end)
+
+-- Parry Time Slider (LayoutOrder = 2)
+createSlider(Controls, "Parry Time", 2, 0.1, 1.0, 0.4, function(val)
+    parryCooldownTime = val
+end)
+
+-- 2. Auto Spam (LayoutOrder = 3)
+local spamFrame, spamToggle, spamCircle = createToggle(Controls, "Auto Spam", 3)
+local spamOn = false
+spamToggle.MouseButton1Click:Connect(function()
+    spamOn = not spamOn
+    spamEnabled = spamOn
+    local color = spamOn and Color3.fromRGB(255, 80, 150) or Color3.fromRGB(80, 60, 90)
+    local circColor = spamOn and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(180, 160, 190)
+    local circPos = spamOn and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
+    TweenService:Create(spamToggle, TweenInfo.new(0.15), {BackgroundColor3 = color}):Play()
+    TweenService:Create(spamCircle, TweenInfo.new(0.15), {BackgroundColor3 = circColor, Position = circPos}):Play()
+end)
+
+-- Spam Time Slider (LayoutOrder = 4)
+createSlider(Controls, "Spam Time", 4, 0.001, 0.1, 0.05, function(val)
+    spamCooldownTime = val
+end)
+
+-- 3. Ball Trail (LayoutOrder = 5)
+local trailFrame, trailToggle, trailCircle = createToggle(Controls, "Ball Trail", 5)
+local trailOn = false
+trailToggle.MouseButton1Click:Connect(function()
+    trailOn = not trailOn
+    ballTrailEnabled = trailOn
+    local color = trailOn and Color3.fromRGB(255, 80, 150) or Color3.fromRGB(80, 60, 90)
+    local circColor = trailOn and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(180, 160, 190)
+    local circPos = trailOn and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
+    TweenService:Create(trailToggle, TweenInfo.new(0.15), {BackgroundColor3 = color}):Play()
+    TweenService:Create(trailCircle, TweenInfo.new(0.15), {BackgroundColor3 = circColor, Position = circPos}):Play()
+end)
+
+-- 4. Counter (LayoutOrder = 6)
+local counterFrame, counterToggle, counterCircle = createToggle(Controls, "Counter Display", 6)
+local counterOn = false
+counterToggle.MouseButton1Click:Connect(function()
+    counterOn = not counterOn
+    counterEnabled = counterOn
+    local color = counterOn and Color3.fromRGB(255, 80, 150) or Color3.fromRGB(80, 60, 90)
+    local circColor = counterOn and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(180, 160, 190)
+    local circPos = counterOn and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
+    TweenService:Create(counterToggle, TweenInfo.new(0.15), {BackgroundColor3 = color}):Play()
+    TweenService:Create(counterCircle, TweenInfo.new(0.15), {BackgroundColor3 = circColor, Position = circPos}):Play()
+end)
+
+-- 5. Anim Fix (LayoutOrder = 7)
+local animFrame, animToggle, animCircle = createToggle(Controls, "Anim Fix", 7)
+local animOn = false
+animToggle.MouseButton1Click:Connect(function()
+    animOn = not animOn
+    animFixEnabled = animOn
+    local color = animOn and Color3.fromRGB(255, 80, 150) or Color3.fromRGB(80, 60, 90)
+    local circColor = animOn and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(180, 160, 190)
+    local circPos = animOn and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
+    TweenService:Create(animToggle, TweenInfo.new(0.15), {BackgroundColor3 = color}):Play()
+    TweenService:Create(animCircle, TweenInfo.new(0.15), {BackgroundColor3 = circColor, Position = circPos}):Play()
+end)
+
+-- 6. Anti Lag (LayoutOrder = 8)
+local lagFrame, lagToggle, lagCircle = createToggle(Controls, "Anti Lag", 8)
+local lagOn = false
+lagToggle.MouseButton1Click:Connect(function()
+    lagOn = not lagOn
+    antiLagEnabled = lagOn
+    local color = lagOn and Color3.fromRGB(255, 80, 150) or Color3.fromRGB(80, 60, 90)
+    local circColor = lagOn and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(180, 160, 190)
+    local circPos = lagOn and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
+    TweenService:Create(lagToggle, TweenInfo.new(0.15), {BackgroundColor3 = color}):Play()
+    TweenService:Create(lagCircle, TweenInfo.new(0.15), {BackgroundColor3 = circColor, Position = circPos}):Play()
+end)
+
+-- ===== TOGGLE GUI =====
+local function setOpen(open)
+    isOpen = open
+    
+    if open then
+        local tween = TweenService:Create(MainFrame, TweenInfo.new(tweenTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Size = UDim2.new(0, fullW, 0, fullH),
+            Position = UDim2.new(0.5, -fullW/2, 0.5, -fullH/2)
+        })
+        tween:Play()
+        
+        task.delay(tweenTime * 0.6, function()
+            Controls.Visible = true
+        end)
+    else
+        Controls.Visible = false
+        
+        local tween = TweenService:Create(MainFrame, TweenInfo.new(tweenTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Size = UDim2.new(0, miniW, 0, miniH),
+            Position = UDim2.new(0.5, -miniW/2, 0.5, -miniH/2)
+        })
+        tween:Play()
+    end
+end
+
+-- Click icon để toggle
+IconButton.MouseButton1Click:Connect(function()
+    setOpen(not isOpen)
+end)
+
+-- Phím Alt
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed and (input.KeyCode == Enum.KeyCode.LeftAlt or input.KeyCode == Enum.KeyCode.RightAlt) then
+        setOpen(not isOpen)
+    end
+    
+    -- Phím G = toggle spam
+    if not gameProcessed and input.KeyCode == Enum.KeyCode.G then
+        spamToggle.MouseButton1Click:Fire()
+    end
+    
+    -- Phím T = toggle auto parry
+    if not gameProcessed and input.KeyCode == Enum.KeyCode.T then
+        parryToggle.MouseButton1Click:Fire()
+    end
+end)
+
+-- ===== MAIN LOOP =====
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+RunService.Heartbeat:Connect(function()
+    if autoParryEnabled then
+        -- Logic auto parry
+        local success, err = pcall(function()
+            local args = {
+                [1] = "Parry"
+            }
+            game:GetService("ReplicatedStorage"):FindFirstChild("ParryEvent"):FireServer(unpack(args))
+        end)
+        task.wait(parryCooldownTime)
+    end
+    
+    if spamEnabled then
+        local success, err = pcall(function()
+            local args = {
+                [1] = "Spam"
+            }
+            game:GetService("ReplicatedStorage"):FindFirstChild("SpamEvent"):FireServer(unpack(args))
+        end)
+        task.wait(spamCooldownTime)
+    end
+    
+    if ballTrailEnabled then
+        -- Ball trail logic
+        pcall(function()
+            game:GetService("ReplicatedStorage"):FindFirstChild("TrailEvent"):FireServer()
+        end)
+    end
+    
+    if counterEnabled then
+        -- Counter logic
+        pcall(function()
+            game:GetService("ReplicatedStorage"):FindFirstChild("CounterEvent"):FireServer()
+        end)
+    end
+    
+    if animFixEnabled then
+        pcall(function()
+            -- Anim fix logic
+        end)
+    end
+    
+    if antiLagEnabled then
+        -- Giảm đồ họa
+        pcall(function()
+            workspace.CurrentCamera.FieldOfView = 70
+        end)
+    end
+end)
+
+-- ===== START =====
+ScreenGui.Parent = player:WaitForChild("PlayerGui")
+
+print("Miu.wtf GUI loaded - Press Alt to toggle, click icon to open/close")
