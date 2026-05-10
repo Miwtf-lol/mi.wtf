@@ -40,7 +40,7 @@ local trailA1 = nil
 
 -- AUTO PARRY OPTIMIZED VARIABLES
 local parryLocked = false
-local parryCooldownTime = 0.4     -- Tăng lên 0.4s theo yêu cầu
+local parryCooldownTime = 0.4     -- Mặc định 0.4s
 local lastParryTime = 0
 local ballIsFar = false
 local parryReady = false
@@ -380,10 +380,10 @@ SpamPanelBtn.BorderSizePixel = 0
 Instance.new("UICorner", SpamPanelBtn).CornerRadius = UDim.new(0,8)
 makeDraggable(SpamPanel, SpamPanelTitle)
 
--- MAIN FRAME — PHÓNG TO, VUÔNG, CÓ THỂ THU NHỎ
+-- MAIN FRAME
 local Frame = Instance.new("Frame", ScreenGui)
-Frame.Size = UDim2.new(0,260,0,260)           -- Phóng to: 260x260
-Frame.Position = UDim2.new(0.5,-130,0.5,-130)
+Frame.Size = UDim2.new(0,260,0,280)           -- Cao hơn 1 tí để chứa thêm slider
+Frame.Position = UDim2.new(0.5,-130,0.5,-140)
 Frame.BackgroundColor3 = P4
 Frame.BackgroundTransparency = 0.35
 Frame.BorderSizePixel = 0
@@ -403,7 +403,7 @@ local Title = Instance.new("TextLabel", TitleBar)
 Title.Size = UDim2.new(0.72,0,1,0)
 Title.Position = UDim2.new(0.05,0,0,0)
 Title.BackgroundTransparency = 1
-Title.Text = "Miu.wtf|https://discord.gg/n3Qa4TRGz"
+Title.Text = "Miu.wtf💗discord.gg/n3Qa4TRGz"
 Title.Font = Enum.Font.GothamBold
 Title.TextSize = 14
 Title.TextColor3 = P1
@@ -421,8 +421,7 @@ MinBtn.BorderSizePixel = 0
 Instance.new("UICorner", MinBtn).CornerRadius = UDim.new(0,6)
 makeDraggable(Frame, TitleBar)
 
--- Nút thu nhỏ: dùng Tween để chuyển kích thước
-local fullSize = UDim2.new(0,260,0,260)
+local fullSize = UDim2.new(0,260,0,280)
 local miniSize = UDim2.new(0,260,0,32)
 
 local function setOpen(state)
@@ -431,7 +430,6 @@ local function setOpen(state)
         Size = state and fullSize or miniSize
     }):Play()
     MinBtn.Text = state and "_" or "▲"
-    -- Ẩn/hiện nội dung sau khi tween xong (hoặc ngay để tránh overlap)
     Content.Visible = state
 end
 
@@ -445,7 +443,7 @@ Content.Position = UDim2.new(0,0,0,32)
 Content.BackgroundTransparency = 1
 Content.Visible = true
 
--- Layout tự động
+-- Layout
 local UIListLayout = Instance.new("UIListLayout", Content)
 UIListLayout.Padding = UDim.new(0,3)
 UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
@@ -460,7 +458,7 @@ topPad.LayoutOrder = 0
 local StatusLabel = Instance.new("TextLabel", Content)
 StatusLabel.Size = UDim2.new(0.9,0,0,16)
 StatusLabel.BackgroundTransparency = 1
-StatusLabel.Text = "Waiting..."
+StatusLabel.Text = "MiuHub"
 StatusLabel.Font = Enum.Font.Gotham
 StatusLabel.TextSize = 11
 StatusLabel.TextColor3 = LGRAY
@@ -512,7 +510,81 @@ createToggleRow(2, "Auto Parry", "OFF", false, function(btn)
     showNotify(autoParry and "Auto Parry ON [T]" or "Auto Parry OFF")
 end)
 
-createToggleRow(3, "Ball Trail", "OFF", false, function(btn)
+-- SLIDER PARRY TIME — dòng 3, ngay dưới Auto Parry
+local parrySliderRow = Instance.new("Frame", Content)
+parrySliderRow.Size = UDim2.new(0.9,0,0,22)
+parrySliderRow.BackgroundTransparency = 1
+parrySliderRow.LayoutOrder = 3
+
+local parrySliderLabel = Instance.new("TextLabel", parrySliderRow)
+parrySliderLabel.Size = UDim2.new(0.6,0,1,0)
+parrySliderLabel.Position = UDim2.new(0,0,0,0)
+parrySliderLabel.BackgroundTransparency = 1
+parrySliderLabel.Text = "Parry Time: 0.40s"
+parrySliderLabel.Font = Enum.Font.GothamBold
+parrySliderLabel.TextSize = 10
+parrySliderLabel.TextColor3 = LGRAY
+parrySliderLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+local parrySliderBg = Instance.new("Frame", parrySliderRow)
+parrySliderBg.Size = UDim2.new(1,0,0,5)
+parrySliderBg.Position = UDim2.new(0,0,0,15)
+parrySliderBg.BackgroundColor3 = P3; parrySliderBg.BorderSizePixel = 0
+parrySliderBg.BackgroundTransparency = 0.4
+Instance.new("UICorner", parrySliderBg).CornerRadius = UDim.new(1,0)
+
+local parrySliderFill = Instance.new("Frame", parrySliderBg)
+parrySliderFill.BackgroundColor3 = P1; parrySliderFill.BorderSizePixel = 0
+Instance.new("UICorner", parrySliderFill).CornerRadius = UDim.new(1,0)
+
+local parrySliderKnob = Instance.new("TextButton", parrySliderBg)
+parrySliderKnob.Size = UDim2.new(0,10,0,10)
+parrySliderKnob.BackgroundColor3 = P1; parrySliderKnob.Text = ""
+parrySliderKnob.BorderSizePixel = 0
+Instance.new("UICorner", parrySliderKnob).CornerRadius = UDim.new(1,0)
+
+-- Hàm chuyển đổi: giá trị slider 0-1 -> parry time 0.1s - 1.0s
+local function parrySliderToTime(val)
+    return 0.1 + val * 0.9  -- 0 -> 0.1s, 1 -> 1.0s
+end
+
+local function parryTimeToSlider(timeVal)
+    return (timeVal - 0.1) / 0.9
+end
+
+local function applyParrySlider(val)
+    val = math.clamp(val, 0, 1)
+    parryCooldownTime = parrySliderToTime(val)
+    parrySliderFill.Size = UDim2.new(val,0,1,0)
+    parrySliderKnob.Position = UDim2.new(val,-5,0.5,-5)
+    parrySliderLabel.Text = string.format("Parry Time: %.2fs", parryCooldownTime)
+end
+
+-- Mặc định 0.4s -> vị trí slider tương ứng
+applyParrySlider(parryTimeToSlider(0.4))
+
+local draggingParrySlider = false
+
+parrySliderKnob.InputBegan:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then draggingParrySlider = true end
+end)
+UserInputService.InputEnded:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then draggingParrySlider = false end
+end)
+UserInputService.InputChanged:Connect(function(i)
+    if draggingParrySlider and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+        applyParrySlider((i.Position.X - parrySliderBg.AbsolutePosition.X) / parrySliderBg.AbsoluteSize.X)
+    end
+end)
+parrySliderBg.InputBegan:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+        applyParrySlider((i.Position.X - parrySliderBg.AbsolutePosition.X) / parrySliderBg.AbsoluteSize.X)
+        draggingParrySlider = true
+    end
+end)
+
+-- Các toggle còn lại — lùi order 1 so với ban đầu
+createToggleRow(4, "Ball Trail", "OFF", false, function(btn)
     ballTrail = not ballTrail
     btn.Text = ballTrail and "ON" or "OFF"
     btn.BackgroundColor3 = ballTrail and P1 or P2
@@ -520,20 +592,20 @@ createToggleRow(3, "Ball Trail", "OFF", false, function(btn)
     showNotify(ballTrail and "Ball Trail ON" or "Ball Trail OFF")
 end)
 
-createToggleRow(4, "Counter", "ON", true, function(btn)
+createToggleRow(5, "Counter", "ON", true, function(btn)
     counterVisible = not counterVisible
     CpsCounter.Visible = counterVisible
     btn.Text = counterVisible and "ON" or "OFF"
     btn.BackgroundColor3 = counterVisible and P1 or P2
 end)
 
-createToggleRow(5, "Anim Fix", "ON", true, function(btn)
+createToggleRow(6, "Anim Fix", "ON", true, function(btn)
     animFix = not animFix
     btn.Text = animFix and "ON" or "OFF"
     btn.BackgroundColor3 = animFix and P1 or P2
 end)
 
-createToggleRow(6, "Anti Lag", "OFF", false, function(btn)
+createToggleRow(7, "Anti Lag", "OFF", false, function(btn)
     antiLag = not antiLag
     setAntiLag(antiLag)
     btn.Text = antiLag and "ON" or "OFF"
@@ -541,7 +613,7 @@ createToggleRow(6, "Anti Lag", "OFF", false, function(btn)
     showNotify(antiLag and "Anti Lag ON" or "Anti Lag OFF")
 end)
 
-createToggleRow(7, "Spam Panel", "OFF", false, function(btn)
+createToggleRow(8, "Miuspam", "OFF", false, function(btn)
     spamPanelVisible = not spamPanelVisible
     SpamPanel.Visible = spamPanelVisible
     btn.Text = spamPanelVisible and "ON" or "OFF"
@@ -552,7 +624,7 @@ end)
 local sliderRow = Instance.new("Frame", Content)
 sliderRow.Size = UDim2.new(0.9,0,0,32)
 sliderRow.BackgroundTransparency = 1
-sliderRow.LayoutOrder = 8
+sliderRow.LayoutOrder = 9
 
 local RateLabel = Instance.new("TextLabel", sliderRow)
 RateLabel.Size = UDim2.new(0.5,0,0,14)
@@ -675,7 +747,6 @@ UserInputService.InputBegan:Connect(function(input, gp)
         parryLocked = false
         ballIsFar = false
         parryReady = false
-        -- Update UI button
         for _, row in pairs(Content:GetChildren()) do
             if row:IsA("Frame") then
                 for _, lbl in pairs(row:GetChildren()) do
@@ -764,7 +835,7 @@ RunService.Heartbeat:Connect(function(dt)
         end
     end
 
-    -- AUTO PARRY — cooldown 0.4s
+    -- AUTO PARRY — dùng biến parryCooldownTime từ slider
     if autoParry and remote and f_raw and ball and ball:IsA("BasePart") and hrp then
         local vel = ball.Velocity.Magnitude
         local toPlayer = hrp.Position - ball.Position
