@@ -1,0 +1,780 @@
+-- Miu.wtf - Square GUI, Translucent Pink Theme, Tiered Layout
+-- Faster Auto Parry + Notifications
+
+-- Services
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local CoreGui = game:GetService("CoreGui")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local Workspace = game:GetService("Workspace")
+
+-- Configuration
+local CONFIG = {
+    SpamEnabled = false,
+    ParryEnabled = false,
+    Minimized = false,
+    AutoParryCooldown = 0.25,
+    BallCheckRadius = 45,
+    HitDistance = 28,
+    FarDist = 70,
+    SafetyTimeout = 0.5,
+    ParryLocked = false,
+    LastBallPos = nil,
+    BallLockTime = 0,
+}
+
+-- Color palette
+local Colors = {
+    P1 = Color3.fromRGB(255, 182, 193),
+    P2 = Color3.fromRGB(255, 150, 170),
+    P3 = Color3.fromRGB(120, 60, 80),
+    P4 = Color3.fromRGB(60, 30, 45),
+    LGRAY = Color3.fromRGB(230, 210, 220),
+    Border = Color3.fromRGB(200, 140, 160),
+}
+
+local Player = Players.LocalPlayer
+local Mouse = Player:GetMouse()
+
+-- ScreenGui
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "MiuGUI"
+ScreenGui.DisplayOrder = 100
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.Parent = CoreGui
+
+-- === NOTIFICATION SYSTEM (góc màn hình - bottom-left) ===
+local NotificationHolder = Instance.new("Frame")
+NotificationHolder.Name = "NotificationHolder"
+NotificationHolder.Size = UDim2.new(0, 280, 1, -20)
+NotificationHolder.Position = UDim2.new(0, 10, 0, 10)
+NotificationHolder.BackgroundTransparency = 1
+NotificationHolder.BorderSizePixel = 0
+NotificationHolder.ClipsDescendants = true
+NotificationHolder.Parent = ScreenGui
+
+local function showNotification(featureName, state)
+    local notifText = featureName .. (state and " § ON" or " § OFF")
+    local notifColor = state and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(255, 50, 50)
+    
+    -- Create notification frame
+    local notif = Instance.new("Frame")
+    notif.Size = UDim2.new(1, 0, 0, 32)
+    notif.Position = UDim2.new(0, 0, 1, 0)
+    notif.BackgroundColor3 = Colors.P4
+    notif.BackgroundTransparency = 0.15
+    notif.BorderSizePixel = 0
+    notif.Parent = NotificationHolder
+    
+    local nCorner = Instance.new("UICorner")
+    nCorner.CornerRadius = UDim.new(0, 6)
+    nCorner.Parent = notif
+    
+    -- Left accent bar
+    local accentBar = Instance.new("Frame")
+    accentBar.Size = UDim2.new(0, 4, 1, 0)
+    accentBar.BackgroundColor3 = notifColor
+    accentBar.BorderSizePixel = 0
+    accentBar.Parent = notif
+    
+    local aCorner = Instance.new("UICorner")
+    aCorner.CornerRadius = UDim.new(0, 6)
+    aCorner.Parent = accentBar
+    
+    -- Status dot
+    local statusDot = Instance.new("Frame")
+    statusDot.Name = "StatusDot"
+    statusDot.Size = UDim2.new(0, 8, 0, 8)
+    statusDot.Position = UDim2.new(0, 12, 0.5, -4)
+    statusDot.BackgroundColor3 = notifColor
+    statusDot.BorderSizePixel = 0
+    statusDot.Parent = notif
+    
+    local dotCorner = Instance.new("UICorner")
+    dotCorner.CornerRadius = UDim.new(1, 0)
+    dotCorner.Parent = statusDot
+    
+    -- Text
+    local label = Instance.new("TextLabel")
+    label.Name = "Label"
+    label.Size = UDim2.new(1, -30, 1, 0)
+    label.Position = UDim2.new(0, 26, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text = notifText
+    label.TextColor3 = Colors.P1
+    label.TextStrokeTransparency = 0.7
+    label.TextSize = 13
+    label.Font = Enum.Font.GothamBold
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = notif
+    
+    -- Animate slide in from bottom
+    notif.Position = UDim2.new(0, 0, 1, 0)
+    local slideIn = TweenService:Create(notif, TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+        Position = UDim2.new(0, 0, 1, -36)
+    })
+    slideIn:Play()
+    
+    -- Auto-destroy after 2.5s with fade
+    task.wait(2.2)
+    local fadeOut = TweenService:Create(notif, TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+        BackgroundTransparency = 1
+    })
+    fadeOut:Play()
+    
+    -- Also fade label and dot
+    local labelFade = TweenService:Create(label, TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+        TextTransparency = 1
+    })
+    labelFade:Play()
+    
+    local dotFade = TweenService:Create(statusDot, TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+        BackgroundTransparency = 1
+    })
+    dotFade:Play()
+    
+    task.wait(0.3)
+    notif:Destroy()
+end
+
+-- === MAIN FRAME (Square) ===
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 400, 0, 400)
+MainFrame.Position = UDim2.new(0.5, -200, 0.5, -200)
+MainFrame.BackgroundColor3 = Colors.P4
+MainFrame.BackgroundTransparency = 0.2
+MainFrame.BorderSizePixel = 0
+MainFrame.ClipsDescendants = true
+MainFrame.Parent = ScreenGui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 8)
+MainCorner.Parent = MainFrame
+
+local InnerBorder = Instance.new("Frame")
+InnerBorder.Name = "InnerBorder"
+InnerBorder.Size = UDim2.new(1, -2, 1, -2)
+InnerBorder.Position = UDim2.new(0, 1, 0, 1)
+InnerBorder.BackgroundTransparency = 1
+InnerBorder.BorderSizePixel = 1
+InnerBorder.BorderColor3 = Colors.Border
+InnerBorder.Parent = MainFrame
+
+-- === TITLE BAR ===
+local TitleBar = Instance.new("Frame")
+TitleBar.Name = "TitleBar"
+TitleBar.Size = UDim2.new(1, 0, 0, 35)
+TitleBar.BackgroundColor3 = Colors.P3
+TitleBar.BackgroundTransparency = 0.25
+TitleBar.BorderSizePixel = 0
+TitleBar.Parent = MainFrame
+
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 8)
+TitleCorner.Parent = TitleBar
+
+local TitleFix = Instance.new("Frame")
+TitleFix.Name = "BottomFix"
+TitleFix.Size = UDim2.new(1, 0, 0, 4)
+TitleFix.Position = UDim2.new(0, 0, 1, -4)
+TitleFix.BackgroundColor3 = Colors.P3
+TitleFix.BackgroundTransparency = 0.25
+TitleFix.BorderSizePixel = 0
+TitleFix.Parent = TitleBar
+
+local TitleText = Instance.new("TextLabel")
+TitleText.Name = "TitleText"
+TitleText.Size = UDim2.new(1, -40, 1, 0)
+TitleText.Position = UDim2.new(0, 10, 0, 0)
+TitleText.BackgroundTransparency = 1
+TitleText.Text = "Miu.wtf"
+TitleText.TextColor3 = Colors.P1
+TitleText.TextStrokeTransparency = 0.7
+TitleText.TextSize = 18
+TitleText.Font = Enum.Font.GothamBold
+TitleText.TextXAlignment = Enum.TextXAlignment.Left
+TitleText.Parent = TitleBar
+
+local MinButton = Instance.new("TextButton")
+MinButton.Name = "MinButton"
+MinButton.Size = UDim2.new(0, 28, 0, 28)
+MinButton.Position = UDim2.new(1, -34, 0.5, -14)
+MinButton.BackgroundColor3 = Colors.P2
+MinButton.BackgroundTransparency = 0.4
+MinButton.BorderSizePixel = 0
+MinButton.Text = "x"
+MinButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinButton.TextSize = 16
+MinButton.Font = Enum.Font.GothamBold
+MinButton.Parent = TitleBar
+
+local MinCorner = Instance.new("UICorner")
+MinCorner.CornerRadius = UDim.new(0, 4)
+MinCorner.Parent = MinButton
+
+-- === MINIMIZED STATE FRAME ===
+local MinimizedFrame = Instance.new("Frame")
+MinimizedFrame.Name = "MinimizedFrame"
+MinimizedFrame.Size = UDim2.new(0, 50, 0, 50)
+MinimizedFrame.Position = UDim2.new(0.5, -25, 0.5, -25)
+MinimizedFrame.BackgroundColor3 = Colors.P4
+MinimizedFrame.BackgroundTransparency = 0.2
+MinimizedFrame.BorderSizePixel = 0
+MinimizedFrame.Visible = false
+MinimizedFrame.Parent = ScreenGui
+
+local MiniCorner = Instance.new("UICorner")
+MiniCorner.CornerRadius = UDim.new(0, 10)
+MiniCorner.Parent = MinimizedFrame
+
+local MiniBorder = Instance.new("Frame")
+MiniBorder.Size = UDim2.new(1, -2, 1, -2)
+MiniBorder.Position = UDim2.new(0, 1, 0, 1)
+MiniBorder.BackgroundTransparency = 1
+MiniBorder.BorderSizePixel = 1
+MiniBorder.BorderColor3 = Colors.Border
+MiniBorder.Parent = MinimizedFrame
+
+local MiniLabel = Instance.new("TextLabel")
+MiniLabel.Name = "MiniLabel"
+MiniLabel.Size = UDim2.new(1, 0, 1, 0)
+MiniLabel.BackgroundTransparency = 1
+MiniLabel.Text = "M"
+MiniLabel.TextColor3 = Colors.P1
+MiniLabel.TextSize = 24
+MiniLabel.Font = Enum.Font.GothamBold
+MiniLabel.Parent = MinimizedFrame
+
+-- === CONTENT AREA ===
+local ContentFrame = Instance.new("Frame")
+ContentFrame.Name = "ContentFrame"
+ContentFrame.Size = UDim2.new(1, -20, 1, -55)
+ContentFrame.Position = UDim2.new(0, 10, 0, 45)
+ContentFrame.BackgroundTransparency = 1
+ContentFrame.BorderSizePixel = 0
+ContentFrame.Parent = MainFrame
+
+-- === TIERED GRID LAYOUT ===
+local columns = 3
+local cellW = 115
+local cellH = 65
+local gapX = 15
+local gapY = 15
+local startX = 0
+local startY = 0
+
+local function createToggleButton(tierRow, tierCol, name, desc, keybind, color)
+    local xPos = startX + (tierCol - 1) * (cellW + gapX)
+    local yPos = startY + (tierRow - 1) * (cellH + gapY)
+    
+    local frame = Instance.new("Frame")
+    frame.Name = name .. "Frame"
+    frame.Size = UDim2.new(0, cellW, 0, cellH)
+    frame.Position = UDim2.new(0, xPos, 0, yPos)
+    frame.BackgroundColor3 = Colors.P3
+    frame.BackgroundTransparency = 0.35
+    frame.BorderSizePixel = 0
+    frame.Parent = ContentFrame
+    
+    local fCorner = Instance.new("UICorner")
+    fCorner.CornerRadius = UDim.new(0, 6)
+    fCorner.Parent = frame
+    
+    local label = Instance.new("TextLabel")
+    label.Name = "Label"
+    label.Size = UDim2.new(1, -10, 0, 22)
+    label.Position = UDim2.new(0, 5, 0, 4)
+    label.BackgroundTransparency = 1
+    label.Text = name
+    label.TextColor3 = Colors.P1
+    label.TextSize = 14
+    label.Font = Enum.Font.GothamBold
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = frame
+    
+    local descLabel = Instance.new("TextLabel")
+    descLabel.Name = "Desc"
+    descLabel.Size = UDim2.new(1, -10, 0, 16)
+    descLabel.Position = UDim2.new(0, 5, 0, 26)
+    descLabel.BackgroundTransparency = 1
+    descLabel.Text = "[" .. keybind .. "] " .. desc
+    descLabel.TextColor3 = Colors.LGRAY
+    descLabel.TextSize = 11
+    descLabel.Font = Enum.Font.Gotham
+    descLabel.TextXAlignment = Enum.TextXAlignment.Left
+    descLabel.Parent = frame
+    
+    local status = Instance.new("Frame")
+    status.Name = "Status"
+    status.Size = UDim2.new(0, 10, 0, 10)
+    status.Position = UDim2.new(1, -16, 0, 6)
+    status.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+    status.BorderSizePixel = 0
+    status.Parent = frame
+    
+    local sCorner = Instance.new("UICorner")
+    sCorner.CornerRadius = UDim.new(1, 0)
+    sCorner.Parent = status
+    
+    local button = Instance.new("TextButton")
+    button.Name = "Button"
+    button.Size = UDim2.new(1, 0, 1, 0)
+    button.BackgroundTransparency = 1
+    button.Text = ""
+    button.Parent = frame
+    
+    return {
+        Frame = frame,
+        Button = button,
+        Status = status,
+        Label = label,
+        Desc = descLabel,
+        Name = name,
+    }
+end
+
+-- Create tiered buttons
+local spamBtn = createToggleButton(1, 1, "Spam", "Auto M1 Spam", "G", Colors.P1)
+local parryBtn = createToggleButton(1, 2, "Parry", "Auto Parry", "T", Colors.P1)
+local blockBtn = createToggleButton(1, 3, "Block", "Auto Block", "Y", Colors.P1)
+local dodgeBtn = createToggleButton(2, 1, "Dodge", "Auto Dodge", "U", Colors.P1)
+local jumpBtn = createToggleButton(2, 2, "Jump", "Auto Jump", "I", Colors.P1)
+local resetBtn = createToggleButton(2, 3, "Reset", "Auto Reset", "O", Colors.P1)
+local potBtn = createToggleButton(3, 1, "Pot", "Auto Potion", "P", Colors.P1)
+local swingBtn = createToggleButton(3, 2, "Swing", "Auto Swing", "H", Colors.P1)
+local clickBtn = createToggleButton(3, 3, "Click", "Auto Click", "J", Colors.P1)
+
+local allToggles = {
+    Spam = spamBtn,
+    Parry = parryBtn,
+    Block = blockBtn,
+    Dodge = dodgeBtn,
+    Jump = jumpBtn,
+    Reset = resetBtn,
+    Pot = potBtn,
+    Swing = swingBtn,
+    Click = clickBtn,
+}
+
+local keyToToggle = {
+    G = "Spam",
+    T = "Parry",
+    Y = "Block",
+    U = "Dodge",
+    I = "Jump",
+    O = "Reset",
+    P = "Pot",
+    H = "Swing",
+    J = "Click",
+}
+
+local toggleStates = {}
+for name, _ in pairs(allToggles) do
+    toggleStates[name] = false
+end
+
+local function updateStatus(name, state)
+    local btn = allToggles[name]
+    if not btn then return end
+    toggleStates[name] = state
+    if state then
+        btn.Status.BackgroundColor3 = Color3.fromRGB(50, 255, 50)
+        btn.Frame.BackgroundColor3 = Colors.P2
+        btn.Frame.BackgroundTransparency = 0.25
+    else
+        btn.Status.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+        btn.Frame.BackgroundColor3 = Colors.P3
+        btn.Frame.BackgroundTransparency = 0.35
+    end
+    
+    -- Show notification
+    showNotification(name, state)
+end
+
+local function toggleFeature(name)
+    local newState = not toggleStates[name]
+    updateStatus(name, newState)
+    
+    if name == "Spam" then
+        CONFIG.SpamEnabled = newState
+    elseif name == "Parry" then
+        CONFIG.ParryEnabled = newState
+    elseif name == "Block" then
+        -- toggle block
+    elseif name == "Dodge" then
+        -- toggle dodge
+    elseif name == "Jump" then
+        -- toggle jump
+    elseif name == "Reset" then
+        -- toggle reset
+    elseif name == "Pot" then
+        -- toggle pot
+    elseif name == "Swing" then
+        -- toggle swing
+    elseif name == "Click" then
+        -- toggle click
+    end
+    
+    return newState
+end
+
+-- Wire up button clicks
+for name, btn in pairs(allToggles) do
+    btn.Button.MouseButton1Click:Connect(function()
+        toggleFeature(name)
+    end)
+end
+
+-- === HOTKEYS ===
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    local key = input.KeyCode
+    
+    if key == Enum.KeyCode.LeftAlt or key == Enum.KeyCode.RightAlt then
+        toggleMinimize()
+        return
+    end
+    
+    local keyStr = tostring(key)
+    local toggleName = keyToToggle[keyStr]
+    if toggleName then
+        toggleFeature(toggleName)
+    end
+end)
+
+-- === MINIMIZE / EXPAND ===
+function toggleMinimize()
+    CONFIG.Minimized = not CONFIG.Minimized
+    MainFrame.Visible = not CONFIG.Minimized
+    MinimizedFrame.Visible = CONFIG.Minimized
+    
+    if CONFIG.Minimized then
+        local pos = MainFrame.AbsolutePosition
+        MinimizedFrame.Position = UDim2.new(0, pos.X, 0, pos.Y)
+        showNotification("GUI", false)
+    else
+        showNotification("GUI", true)
+    end
+end
+
+MinButton.MouseButton1Click:Connect(function()
+    toggleMinimize()
+end)
+
+MinimizedFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        toggleMinimize()
+    end
+end)
+
+-- === DRAGGING ===
+local dragging, dragStart, startPos
+
+TitleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+TitleBar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement and dragging then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+MinimizedFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = MinimizedFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+MinimizedFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement and dragging then
+        local delta = input.Position - dragStart
+        MinimizedFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+-- === CORE LOGIC ===
+local function doClick()
+    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game:GetService("UserInputService"):GetMouseLocation(), 1)
+    task.wait(0.02)
+    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game:GetService("UserInputService"):GetMouseLocation(), 1)
+end
+
+-- Spam loop
+task.spawn(function()
+    while true do
+        task.wait(0.08)
+        if CONFIG.SpamEnabled then
+            doClick()
+        end
+    end
+end)
+
+-- === AUTO PARRY ===
+local function findNearestBall()
+    local char = Player.Character
+    if not char then return nil, math.huge end
+    local humanoidRootPart = char:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then return nil, math.huge end
+    local rootPos = humanoidRootPart.Position
+    
+    local nearestBall = nil
+    local nearestDist = math.huge
+    
+    local ballNames = {"Ball", "Football", "SoccerBall", "Basketball", "Volleyball", "Balloon", "Fireball", "Projectile", "Bullet", "Hitbox"}
+    
+    for _, obj in pairs(Workspace:GetDescendants()) do
+        if obj:IsA("Part") or obj:IsA("MeshPart") or obj:IsA("BasePart") then
+            local objName = obj.Name
+            local isBall = false
+            for _, bName in ipairs(ballNames) do
+                if objName:find(bName) then
+                    isBall = true
+                    break
+                end
+            end
+            if not isBall then
+                if obj:IsA("BasePart") and obj.AssemblyLinearVelocity and obj.AssemblyLinearVelocity.Magnitude > 15 then
+                    isBall = true
+                end
+            end
+            if isBall then
+                local dist = (obj.Position - rootPos).Magnitude
+                if dist < nearestDist then
+                    nearestDist = dist
+                    nearestBall = obj
+                end
+            end
+        end
+    end
+    
+    return nearestBall, nearestDist
+end
+
+local function doParry()
+    local parryKeys = {
+        Enum.KeyCode.F,
+        Enum.KeyCode.Q,
+        Enum.KeyCode.E,
+        Enum.KeyCode.R,
+        Enum.KeyCode.ButtonR2,
+    }
+    
+    for _, key in ipairs(parryKeys) do
+        VirtualInputManager:SendKeyEvent(true, key, false, game)
+        task.wait(0.015)
+        VirtualInputManager:SendKeyEvent(false, key, false, game)
+        task.wait(0.01)
+    end
+end
+
+-- Auto parry loop
+task.spawn(function()
+    while true do
+        task.wait(0.03)
+        
+        if not CONFIG.ParryEnabled then
+            CONFIG.ParryLocked = false
+            CONFIG.LastBallPos = nil
+            continue
+        end
+        
+        local char = Player.Character
+        if not char then continue end
+        local humanoidRootPart = char:FindFirstChild("HumanoidRootPart")
+        if not humanoidRootPart then continue end
+        local rootPos = humanoidRootPart.Position
+        
+        local nearestBall, nearestDist = findNearestBall()
+        
+        if nearestBall then
+            local ballPos = nearestBall.Position
+            local dist = (ballPos - rootPos).Magnitude
+            
+            if CONFIG.ParryLocked and CONFIG.LastBallPos then
+                local ballMovedFar = (ballPos - CONFIG.LastBallPos).Magnitude > CONFIG.FarDist
+                local ballIsFar = dist > CONFIG.FarDist
+                local timeExpired = (tick() - CONFIG.BallLockTime) > CONFIG.SafetyTimeout
+                
+                if ballIsFar or ballMovedFar or timeExpired then
+                    CONFIG.ParryLocked = false
+                    CONFIG.LastBallPos = nil
+                end
+            end
+            
+            if dist < CONFIG.HitDistance and not CONFIG.ParryLocked then
+                doParry()
+                CONFIG.ParryLocked = true
+                CONFIG.LastBallPos = ballPos
+                CONFIG.BallLockTime = tick()
+            end
+            
+            if CONFIG.ParryLocked then
+                CONFIG.LastBallPos = ballPos
+            end
+        else
+            if CONFIG.ParryLocked then
+                local timeExpired = (tick() - CONFIG.BallLockTime) > CONFIG.SafetyTimeout
+                if timeExpired then
+                    CONFIG.ParryLocked = false
+                    CONFIG.LastBallPos = nil
+                end
+            end
+        end
+    end
+end)
+
+-- === AUTO BLOCK / DODGE / JUMP / RESET / POT / SWING / CLICK ===
+task.spawn(function()
+    while true do
+        task.wait(0.15)
+        if toggleStates["Block"] then
+            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Z, false, game)
+            task.wait(0.02)
+            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Z, false, game)
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        if toggleStates["Dodge"] then
+            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.LeftShift, false, game)
+            task.wait(0.05)
+            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.LeftShift, false, game)
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(0.3)
+        if toggleStates["Jump"] then
+            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
+            task.wait(0.02)
+            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(2.0)
+        if toggleStates["Reset"] then
+            local char = Player.Character
+            if char and char:FindFirstChild("Humanoid") then
+                local hum = char.Humanoid
+                if hum.Health <= 0 then
+                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.R, false, game)
+                    task.wait(0.02)
+                    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.R, false, game)
+                end
+            end
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(1.0)
+        if toggleStates["Pot"] then
+            local char = Player.Character
+            if char and char:FindFirstChild("Humanoid") then
+                local hum = char.Humanoid
+                if hum.Health < hum.MaxHealth * 0.6 then
+                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
+                    task.wait(0.02)
+                    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
+                end
+            end
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(0.2)
+        if toggleStates["Swing"] then
+            doClick()
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(0.05)
+        if toggleStates["Click"] then
+            doClick()
+        end
+    end
+end)
+
+-- === BALL TRAIL ===
+local trailEnabled = true
+
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        if not trailEnabled then continue end
+        
+        local nearestBall, _ = findNearestBall()
+        if nearestBall and CONFIG.ParryEnabled then
+            local attachment = nearestBall:FindFirstChild("MiuTrailAttachment")
+            if not attachment then
+                attachment = Instance.new("Attachment")
+                attachment.Name = "MiuTrailAttachment"
+                attachment.Parent = nearestBall
+                
+                local trail = Instance.new("Trail")
+                trail.Name = "MiuTrail"
+                trail.Attachment0 = attachment
+                trail.Attachment1 = attachment
+                trail.Color = ColorSequence.new({
+                    ColorSequenceKeypoint.new(0, Colors.P1),
+                    ColorSequenceKeypoint.new(0.5, Colors.P2),
+                    ColorSequenceKeypoint.new(1, Colors.P3),
+                })
+                trail.Transparency = NumberSequence.new(0.5)
+                trail.Lifetime = 0.4
+                trail.WidthScale = NumberSequence.new(0.5)
+                trail.Enabled = true
+                trail.Parent = nearestBall
+            end
+        end
+    end
+end)
+
+-- === CLEANUP ===
+ScreenGui.AncestryChanged:Connect(function()
+    if not ScreenGui.Parent then
+        for _, obj in pairs(Workspace:GetDescendants()) do
+            if obj.Name == "MiuTrail" or obj.Name == "MiuTrailAttachment" then
+                obj:Destroy()
+            end
+        end
+    end
+end)
+
+print("[Miu.wtf] Loaded - Square GUI | Pink Theme | Tiered Layout | Notifications")
