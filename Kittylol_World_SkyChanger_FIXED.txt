@@ -8738,7 +8738,7 @@ print("[SKR] Loaded. Cho 1 cu parry THAT de capture mau, sau do bat Auto Parry v
 local ParryRight = Parry:create_group("Manual Spam", "right")
 
 local manualSpamEnabled = false
-local manualSpamRate = 50
+local manualSpamRate = 500
 local manualSpamLoop = nil
 
 local function CreateSpamUI()
@@ -8896,8 +8896,8 @@ ParryRight:create_toggle("manual_spam", {
 ParryRight:create_slider("spam_rate", {
     title = "Spam Rate",
     minimum = 1,
-    maximum = 100,
-    default = 50,
+    maximum = 1000,
+    default = 500,
     rounding = true,
     callback = function(value)
         manualSpamRate = value
